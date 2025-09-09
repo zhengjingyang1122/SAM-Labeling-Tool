@@ -1,0 +1,192 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import List, Optional
+
+from PySide6.QtCore import QDir, QModelIndex, QPoint, Qt, Signal
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDockWidget,
+    QFileSystemModel,
+    QInputDialog,
+    QMenu,
+    QMessageBox,
+    QToolBar,
+    QTreeView,
+    QVBoxLayout,
+    QWidget,
+)
+
+
+class MediaExplorer(QDockWidget):
+    """左側可收放的檔案導航欄
+    - 顯示指定根目錄下的影像與影片檔
+    - 支援刪除、重新命名
+    - 可透過 QDockWidget 收放/關閉；可浮動為獨立視窗
+    """
+
+    file_deleted = Signal(str)  # 送出被刪除檔案的絕對路徑
+    file_renamed = Signal(str, str)  # (old_abs_path, new_abs_path)
+
+    def __init__(self, parent=None, name_filters: Optional[List[str]] = None):
+        super().__init__("媒體檔案", parent)
+        self.setObjectName("MediaExplorerDock")
+        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.setFeatures(
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+
+        self._root_dir = Path.home()
+        self._filters = name_filters or ["*.jpg", "*.jpeg", "*.png", "*.mp4", "*.mov", "*.avi"]
+
+        # 內部主體
+        body = QWidget(self)
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        # 工具列
+        self.toolbar = QToolBar(body)
+        self.action_refresh = QAction("重新整理", self.toolbar)
+        self.action_delete = QAction("刪除", self.toolbar)
+        self.action_rename = QAction("重新命名", self.toolbar)
+        self.action_dock = QAction("合併回主視窗", self.toolbar)
+
+        self.toolbar.addAction(self.action_refresh)
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.action_rename)
+        self.toolbar.addAction(self.action_delete)
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.action_dock)
+
+        layout.addWidget(self.toolbar)
+
+        # 檔案樹
+        self.model = QFileSystemModel(self)
+        self.model.setFilter(QDir.AllDirs | QDir.NoDotAndDotDot | QDir.Files)
+        self.model.setNameFilters(self._filters)
+        self.model.setNameFilterDisables(False)  # 僅顯示符合篩選
+        self.model.setReadOnly(True)  # 重新命名我們自行處理
+
+        self.tree = QTreeView(body)
+        self.tree.setModel(self.model)
+        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_context_menu)
+        self.tree.setSortingEnabled(True)
+        self.tree.sortByColumn(0, Qt.AscendingOrder)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setColumnWidth(0, 260)  # 0-Name, 1-Size, 2-Type, 3-Date Modified
+
+        layout.addWidget(self.tree)
+        self.setWidget(body)
+
+        # 綁定工具列動作
+        self.action_refresh.triggered.connect(self.refresh)
+        self.action_delete.triggered.connect(self.delete_selected)
+        self.action_rename.triggered.connect(self.rename_selected)
+        self.action_dock.triggered.connect(lambda: self.setFloating(False))
+
+    # ----------------------
+    # 公開 API
+    # ----------------------
+    def set_root_dir(self, path: Path | str):
+        p = Path(path).expanduser()
+        p.mkdir(parents=True, exist_ok=True)
+        self._root_dir = p
+        root_index = self.model.setRootPath(str(p))
+        self.tree.setRootIndex(root_index)
+
+    def refresh(self):
+        # 某些 PySide6 版本未暴露 QFileSystemModel.refresh，改以 reset rootPath
+        root = str(self._root_dir)
+        root_index = self.model.setRootPath(root)
+        self.tree.setRootIndex(root_index)
+
+    # ----------------------
+    # 內部輔助
+    # ----------------------
+    def _selected_indexes(self) -> List[QModelIndex]:
+        sel = self.tree.selectionModel()
+        return sel.selectedRows() if sel else []
+
+    def _indexes_to_paths(self, indexes: List[QModelIndex]) -> List[Path]:
+        return [Path(self.model.filePath(idx)) for idx in indexes]
+
+    def _select_first_file_index(self) -> Optional[QModelIndex]:
+        idxs = self._selected_indexes()
+        return idxs[0] if idxs else None
+
+    # ----------------------
+    # 操作: 刪除 / 重新命名
+    # ----------------------
+    def delete_selected(self):
+        indexes = self._selected_indexes()
+        if not indexes:
+            return
+        paths = self._indexes_to_paths(indexes)
+
+        # 僅刪除檔案，資料夾略過(避免誤刪)
+        files = [p for p in paths if p.is_file()]
+        if not files:
+            return
+
+        msg = "確定要刪除以下檔案？\n\n" + "\n".join([f"- {p.name}" for p in files])
+        if (
+            QMessageBox.question(self, "刪除檔案", msg, QMessageBox.Yes | QMessageBox.No)
+            != QMessageBox.Yes
+        ):
+            return
+
+        errors = []
+        for p in files:
+            try:
+                p.unlink()
+                self.file_deleted.emit(str(p))
+            except Exception as e:
+                errors.append(f"{p.name}: {e}")
+
+        if errors:
+            QMessageBox.warning(self, "刪除部份失敗", "\n".join(errors))
+        self.refresh()
+
+    def rename_selected(self):
+        idx = self._select_first_file_index()
+        if idx is None:
+            return
+        p = Path(self.model.filePath(idx))
+        if not p.is_file():
+            return
+
+        new_name, ok = QInputDialog.getText(self, "重新命名", f"新檔名（含副檔名）:\n{p.name}")
+        if not ok or not new_name.strip():
+            return
+        new_name = new_name.strip()
+
+        target = p.with_name(new_name)
+        if target.exists():
+            QMessageBox.warning(self, "命名衝突", f"檔案已存在：{target.name}")
+            return
+
+        try:
+            p.rename(target)
+            self.file_renamed.emit(str(p), str(target))
+        except Exception as e:
+            QMessageBox.critical(self, "重新命名失敗", str(e))
+            return
+        self.refresh()
+
+    # ----------------------
+    # 右鍵選單
+    # ----------------------
+    def _on_context_menu(self, pos: QPoint):
+        menu = QMenu(self)
+        menu.addAction(self.action_refresh)
+        menu.addSeparator()
+        menu.addAction(self.action_rename)
+        menu.addAction(self.action_delete)
+        menu.addSeparator()
+        menu.addAction(self.action_dock)
+        menu.exec(self.tree.viewport().mapToGlobal(pos))

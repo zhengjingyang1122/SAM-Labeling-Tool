@@ -1,0 +1,77 @@
+# modules/burst.py
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Optional
+
+from PySide6.QtCore import QObject, QTimer
+from PySide6.QtMultimedia import QImageCapture
+
+from modules.photo import PhotoCapture
+from utils.utils import ensure_dir, ts
+
+
+@dataclass
+class BurstCallbacks:
+    on_progress: Optional[Callable[[int], None]] = None  # remaining
+    on_done: Optional[Callable[[], None]] = None
+
+
+class BurstShooter(QObject):
+    def __init__(self, image_capture: QImageCapture, parent: Optional[QObject] = None):
+        super().__init__(parent)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._photo = PhotoCapture(image_capture, parent=self)
+        self._total = 0
+        self._remaining = 0
+        self._interval_ms = 500
+        self._series_id = ""
+        self._save_dir = Path(".")
+        self._cbs = BurstCallbacks()
+
+    def start(
+        self,
+        count: int,
+        interval_ms: int,
+        save_dir: Path,
+        callbacks: Optional[BurstCallbacks] = None,
+    ):
+        if self._timer.isActive():
+            return
+        ensure_dir(save_dir)
+        self._total = int(count)
+        self._remaining = int(count)
+        self._interval_ms = int(interval_ms)
+        self._series_id = ts()
+        self._save_dir = save_dir
+        self._cbs = callbacks or BurstCallbacks()
+
+        # 先拍第一張
+        self._tick(initial=True)
+        # 啟動之後的節奏
+        self._timer.start(self._interval_ms)
+
+    def stop(self):
+        if self._timer.isActive():
+            self._timer.stop()
+        self._remaining = 0
+        self._series_id = ""
+
+    def is_active(self) -> bool:
+        return self._timer.isActive()
+
+    def _tick(self, initial: bool = False):
+        if self._remaining <= 0:
+            self.stop()
+            if self._cbs.on_done:
+                self._cbs.on_done()
+            return
+
+        shot_index = self._total - self._remaining + 1
+        self._photo.capture_burst_one(self._save_dir, self._series_id, shot_index)
+        self._remaining -= 1
+
+        if self._remaining > 0 and self._cbs.on_progress:
+            self._cbs.on_progress(self._remaining)
