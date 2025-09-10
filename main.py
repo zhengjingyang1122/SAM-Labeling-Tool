@@ -6,15 +6,6 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtMultimedia import (
-    QAudioInput,
-    QCamera,
-    QImageCapture,
-    QMediaCaptureSession,
-    QMediaDevices,
-    QMediaFormat,
-    QMediaRecorder,
-)
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QApplication,
@@ -34,7 +25,8 @@ from PySide6.QtWidgets import (
 )
 
 from modules.burst import BurstCallbacks, BurstShooter
-from modules.explorer import MediaExplorer
+from modules.camera_manager import CameraManager
+from modules.explorer_controller import ExplorerController
 
 # 本專案的功能模組
 from modules.photo import PhotoCapture
@@ -51,29 +43,22 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Webcam Snapper - Modular Edition")
         self.resize(1100, 720)
 
-        # 狀態屬性
-        self.camera: Optional[QCamera] = None
-        self.capture_session: Optional[QMediaCaptureSession] = None
-        self.image_capture: Optional[QImageCapture] = None
-        self.audio_input: Optional[QAudioInput] = None
-        self.recorder: Optional[QMediaRecorder] = None
-
         # 模組化控制器
         self.photo_ctrl: Optional[PhotoCapture] = None
         self.burst_ctrl: Optional[BurstShooter] = None
         self.rec_ctrl: Optional[VideoRecorder] = None
+        self.cam = CameraManager(self)
 
         # UI
         self._build_ui()
 
         # 初始狀態
         self._update_ui_state()
-        if hasattr(self, "explorer") and self.explorer is not None:
-            self.explorer.refresh()
+        if hasattr(self, "explorer_ctrl"):
+            self.explorer_ctrl.refresh()
 
         # 載入相機清單（新增）
-        self._video_devices = []
-        self._refresh_camera_list()
+        self._populate_camera_devices()
 
     # ----------------------
     # UI 組裝
@@ -94,7 +79,7 @@ class MainWindow(QMainWindow):
         self.btn_toggle_explorer = QPushButton("檔案瀏覽")
         self.btn_toggle_explorer.setCheckable(True)
         self.btn_toggle_explorer.setChecked(True)
-        self.btn_toggle_explorer.toggled.connect(self._toggle_explorer)
+
         dir_layout = QHBoxLayout()
         dir_layout.addWidget(QLabel("資料夾:"))
         dir_layout.addWidget(self.dir_edit, 1)
@@ -106,7 +91,6 @@ class MainWindow(QMainWindow):
         cam_sel_box = QGroupBox("相機設備")
         self.cam_combo = QComboBox()
         self.btn_refresh_cam = QPushButton("刷新設備")
-        self.btn_refresh_cam.clicked.connect(self._refresh_camera_list)
         cam_sel_layout = QHBoxLayout()
         cam_sel_layout.addWidget(QLabel("裝置:"))
         cam_sel_layout.addWidget(self.cam_combo, 1)
@@ -191,33 +175,17 @@ class MainWindow(QMainWindow):
 
         central.setLayout(root)
 
-        # 建立左側可收放檔案瀏覽
-        self.explorer = MediaExplorer(self)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.explorer)
-        self.explorer.set_root_dir(Path(self.dir_edit.text()).expanduser())
-        self.btn_toggle_explorer.setChecked(True)
-
-        self.explorer.visibilityChanged.connect(self._on_explorer_visibility_changed)
+        # 建立左側可收放檔案瀏覽（改用控制器）
+        self.explorer_ctrl = ExplorerController(
+            self,
+            self.btn_toggle_explorer,
+            self.dir_edit,
+        )
+        self.btn_refresh_cam.clicked.connect(self._populate_camera_devices)
 
     # ----------------------
     # 檔案與路徑
     # ----------------------
-
-    def _toggle_explorer(self, checked: bool):
-        if hasattr(self, "explorer") and self.explorer is not None:
-            self.explorer.setVisible(checked)
-            if checked:
-                # 顯示時若在浮動狀態，強制合併回主視窗
-                try:
-                    self.explorer.setFloating(False)
-                except Exception:
-                    pass
-
-    # 新增：當使用者按 Dock 的 X 或更改可視狀態時，同步按鈕
-    def _on_explorer_visibility_changed(self, visible: bool):
-        self.btn_toggle_explorer.blockSignals(True)
-        self.btn_toggle_explorer.setChecked(visible)
-        self.btn_toggle_explorer.blockSignals(False)
 
     def _choose_dir(self):
         start_dir = Path(self.dir_edit.text()).expanduser()
@@ -228,139 +196,81 @@ class MainWindow(QMainWindow):
             selected = dlg.selectedFiles()
             if selected:
                 self.dir_edit.setText(selected[0])
-                if hasattr(self, "explorer") and self.explorer is not None:
-                    self.explorer.set_root_dir(Path(selected[0]).expanduser())
+            if hasattr(self, "explorer_ctrl"):
+                self.explorer_ctrl.set_root_dir_from_edit()
 
     def _save_dir(self) -> Path:
         path = Path(self.dir_edit.text()).expanduser()
         return ensure_dir(path)
 
     # 相機設備管理（新增）
-    def _refresh_camera_list(self):
-        from PySide6.QtMultimedia import QMediaDevices
-
-        devices = QMediaDevices.videoInputs()
-        self._video_devices = list(devices)
+    def _populate_camera_devices(self):
+        devices = self.cam.list_devices()
         self.cam_combo.blockSignals(True)
         self.cam_combo.clear()
-        for i, dev in enumerate(self._video_devices):
-            name = getattr(dev, "description", lambda: f"Camera {i}")()
+        for i, (name, _dev) in enumerate(devices):
             self.cam_combo.addItem(name, i)
         self.cam_combo.blockSignals(False)
-        self.btn_start_cam.setEnabled(len(self._video_devices) > 0)
-        if not self._video_devices:
-            self.status_label.setText("狀態: 未偵測到相機設備")
-
-    def _selected_camera_device(self):
-        idx = self.cam_combo.currentIndex() if hasattr(self, "cam_combo") else -1
-        if idx < 0:
-            return None
-        return self._video_devices[idx]
+        self.btn_start_cam.setEnabled(len(devices) > 0)
 
     # ----------------------
     # 相機生命週期
     # ----------------------
+
     def start_camera(self):
-        if self.camera is not None:
-            return  # 已啟動
+        if self.cam.is_active():
+            return
 
-        video_dev = self._selected_camera_device()
-        if video_dev is None:
-            video_dev = QMediaDevices.defaultVideoInput()
-        self.camera = QCamera(video_dev)
-        self.capture_session = QMediaCaptureSession()
-        self.capture_session.setCamera(self.camera)
+        # 設定選定裝置
+        self.cam.set_selected_device_index(self.cam_combo.currentIndex())
 
-        # 視訊輸出到預覽
-        self.capture_session.setVideoOutput(self.video_widget)
+        # 回呼：影像儲存、錯誤、錄影狀態、錄影錯誤
+        def _on_saved(id_: int, file_path: str):
+            from pathlib import Path as _P
 
-        # 影像擷取(QImageCapture)
-        self.image_capture = QImageCapture()
-        self.capture_session.setImageCapture(self.image_capture)
-        self.image_capture.imageCaptured.connect(self._on_image_captured)
-        self.image_capture.imageSaved.connect(self._on_image_saved)
-        self.image_capture.errorOccurred.connect(self._on_image_error)
+            self.status_label.setText(f"狀態: 已儲存 {_P(file_path).name}")
+            self._update_ui_state()
+            self.explorer_ctrl.refresh()
 
-        # 音訊輸入(QAudioInput)
-        audio_dev = QMediaDevices.defaultAudioInput()
-        self.audio_input = QAudioInput(audio_dev)
-        self.capture_session.setAudioInput(self.audio_input)
+        def _on_img_err(id_: int, err: int, msg: str):
+            from PySide6.QtWidgets import QMessageBox
 
-        # 影音紀錄器(QMediaRecorder)
-        self.recorder = QMediaRecorder()
-        self.capture_session.setRecorder(self.recorder)
+            QMessageBox.critical(self, "擷取影像錯誤", msg)
 
-        # 盡力設定常見格式
-        try:
-            fmt = QMediaFormat()
-            fmt.setFileFormat(QMediaFormat.MPEG4)
-            fmt.setVideoCodec(QMediaFormat.VideoCodec.H264)
-            fmt.setAudioCodec(QMediaFormat.AudioCodec.AAC)
-            self.recorder.setMediaFormat(fmt)
-            self.recorder.setQuality(QMediaRecorder.Quality.NormalQuality)
-        except Exception:
-            pass
+        def _on_rec_state(_state: int):
+            self._update_ui_state()
 
-        # 控制器初始化
-        self.photo_ctrl = PhotoCapture(self.image_capture, parent=self)
-        self.burst_ctrl = BurstShooter(self.image_capture, parent=self)
-        self.rec_ctrl = VideoRecorder(self.recorder, parent=self)
+        def _on_rec_err(_err: int, msg: str):
+            from PySide6.QtWidgets import QMessageBox
 
-        # 註冊錄影訊號
-        self.recorder.recorderStateChanged.connect(self._on_rec_state_changed)
-        self.recorder.errorChanged.connect(self._on_rec_error)
+            QMessageBox.critical(self, "錄影錯誤", msg)
 
-        # 啟動相機
-        try:
-            self.camera.start()
-            self.status_label.setText("狀態: 相機啟動")
-        except Exception as e:
-            QMessageBox.critical(self, "相機啟動失敗", str(e))
-            self._cleanup_camera_refs()
+        # 啟動相機（由控制器建立 session 與子控制器）
+        self.cam.start(
+            self.video_widget,
+            on_image_saved=_on_saved,
+            on_image_error=_on_img_err,
+            on_rec_state_changed=_on_rec_state,
+            on_rec_error=_on_rec_err,
+        )
 
+        # 取得封裝後的三個控制器供既有邏輯使用
+        self.photo_ctrl = self.cam.photo
+        self.burst_ctrl = self.cam.burst
+        self.rec_ctrl = self.cam.rec
+
+        self.status_label.setText("狀態: 相機啟動")
         self._update_ui_state()
 
     def stop_camera(self):
-        # 停止連拍與錄影
         self.stop_burst()
-        try:
-            if self.rec_ctrl is not None:
-                self.rec_ctrl.stop()
-        except Exception:
-            pass
-
-        if self.camera is not None:
-            try:
-                self.camera.stop()
-            except Exception:
-                pass
-
-        self._cleanup_camera_refs()
+        self.cam.stop()
+        self.photo_ctrl = self.burst_ctrl = self.rec_ctrl = None
         self.status_label.setText("狀態: 相機停止")
         self._update_ui_state()
 
-    def _cleanup_camera_refs(self):
-        self.photo_ctrl = None
-        self.burst_ctrl = None
-        self.rec_ctrl = None
-        self.image_capture = None
-        self.recorder = None
-        self.audio_input = None
-        self.capture_session = None
-        self.camera = None
-
     def _is_camera_active(self) -> bool:
-        if self.camera is None:
-            return False
-        try:
-            return self.camera.isActive()  # Qt 6.8+
-        except Exception:
-            try:
-                from PySide6.QtMultimedia import QCamera as _QCam
-
-                return self.camera.cameraState() == _QCam.ActiveState
-            except Exception:
-                return False
+        return self.cam.is_active()
 
     # ----------------------
     # 拍照
@@ -459,35 +369,12 @@ class MainWindow(QMainWindow):
         try:
             self.rec_ctrl.stop()
             self.status_label.setText("狀態: 錄影停止")
-            if hasattr(self, "explorer") and self.explorer is not None:
-                self.explorer.refresh()
+            if hasattr(self, "explorer_ctrl"):
+                self.explorer_ctrl.refresh()
         except Exception as e:
             QMessageBox.critical(self, "停止錄影錯誤", str(e))
         finally:
             self._update_ui_state()
-
-    # ----------------------
-    # 訊號回呼
-    # ----------------------
-    def _on_image_captured(self, id_: int, preview):
-        # 可視需要使用 preview 更新縮圖
-        pass
-
-    def _on_image_saved(self, id_: int, file_path: str):
-        self.status_label.setText(f"狀態: 已儲存 {Path(file_path).name}")
-        self._update_ui_state()
-        if hasattr(self, "explorer") and self.explorer is not None:
-            self.explorer.refresh()
-
-    def _on_image_error(self, id_: int, err, msg: str):
-        QMessageBox.critical(self, "擷取影像錯誤", msg)
-
-    def _on_rec_state_changed(self, state):
-        # 僅更新 UI, 具體狀態顯示交由控制函式處理
-        self._update_ui_state()
-
-    def _on_rec_error(self, err, msg: str):
-        QMessageBox.critical(self, "錄影錯誤", msg)
 
     # ----------------------
     # UI 狀態
