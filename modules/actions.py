@@ -17,11 +17,6 @@ try:
 except Exception:
     sam_engine_mod = None
 
-try:
-    from modules.dock_titlebar import apply_unified_dock_titlebar
-except Exception:
-    apply_unified_dock_titlebar = None
-
 
 # ---------------- 小工具 ----------------
 def _ensure_dir(p: Path) -> None:
