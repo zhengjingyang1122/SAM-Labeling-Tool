@@ -52,14 +52,11 @@ class MediaExplorer(QDockWidget):
         self.action_refresh = QAction("重新整理", self.toolbar)
         self.action_delete = QAction("刪除", self.toolbar)
         self.action_rename = QAction("重新命名", self.toolbar)
-        self.action_dock = QAction("合併回主視窗", self.toolbar)
 
         self.toolbar.addAction(self.action_refresh)
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.action_rename)
         self.toolbar.addAction(self.action_delete)
-        self.toolbar.addSeparator()
-        self.toolbar.addAction(self.action_dock)
 
         layout.addWidget(self.toolbar)
 
@@ -87,7 +84,6 @@ class MediaExplorer(QDockWidget):
         self.action_refresh.triggered.connect(self.refresh)
         self.action_delete.triggered.connect(self.delete_selected)
         self.action_rename.triggered.connect(self.rename_selected)
-        self.action_dock.triggered.connect(lambda: self.setFloating(False))
 
     # ----------------------
     # 公開 API
@@ -181,12 +177,31 @@ class MediaExplorer(QDockWidget):
     # ----------------------
     # 右鍵選單
     # ----------------------
+
     def _on_context_menu(self, pos: QPoint):
         menu = QMenu(self)
         menu.addAction(self.action_refresh)
         menu.addSeparator()
         menu.addAction(self.action_rename)
         menu.addAction(self.action_delete)
-        menu.addSeparator()
-        menu.addAction(self.action_dock)
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def last_image_path(self) -> Optional[str]:
+        exts = {".png", ".jpg", ".jpeg", ".bmp"}
+        files = [
+            p for p in Path(self._root_dir).glob("*") if p.is_file() and p.suffix.lower() in exts
+        ]
+        if not files:
+            return None
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return str(files[0])
+
+    def last_video_path(self) -> Optional[str]:
+        exts = {".mp4", ".mov", ".avi", ".mkv"}
+        files = [
+            p for p in Path(self._root_dir).glob("*") if p.is_file() and p.suffix.lower() in exts
+        ]
+        if not files:
+            return None
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return str(files[0])

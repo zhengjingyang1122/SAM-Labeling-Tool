@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import QSize
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -112,6 +113,16 @@ def build_ui(win):
     right_panel.addWidget(photo_box)
     right_panel.addWidget(burst_box)
     right_panel.addWidget(rec_box)
+    win.chk_preload_sam = QCheckBox("預先載入 SAM 模型")
+    right_panel.addWidget(win.chk_preload_sam)  # 建議放在分割工具 group 上方
+    seg_box = QGroupBox("分割工具")
+    seg_layout = QHBoxLayout()
+    win.btn_auto_seg_image = QPushButton("自動分割影像")
+    win.btn_auto_seg_video = QPushButton("自動分割影片")
+    seg_layout.addWidget(win.btn_auto_seg_image)
+    seg_layout.addWidget(win.btn_auto_seg_video)
+    seg_box.setLayout(seg_layout)
+    right_panel.addWidget(seg_box)
     right_panel.addStretch(1)
     right_panel.addWidget(win.status_label)
 
@@ -134,3 +145,6 @@ def wire_ui(win, actions):
     win.btn_rec_resume.clicked.connect(actions.resume_recording)
     win.btn_rec_pause.clicked.connect(actions.pause_recording)
     win.btn_rec_stop.clicked.connect(actions.stop_recording)
+    win.btn_auto_seg_image.clicked.connect(actions.open_auto_segment_menu)
+    win.btn_auto_seg_video.clicked.connect(actions.open_segmentation_view_for_last_video)
+    win.chk_preload_sam.toggled.connect(actions.toggle_preload_sam)
