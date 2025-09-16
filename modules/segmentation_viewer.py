@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QProgressDialog,
     QPushButton,
     QRadioButton,
     QSpinBox,
@@ -34,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.explorer import MediaExplorer
+from modules.status_footer import StatusFooter
 
 # ---------- helpers ----------
 
@@ -72,6 +72,7 @@ class ImageView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setMouseTracking(True)
+        # 注意：狀態列改由 SegmentationViewer(QMainWindow) 安裝，這裡不要裝
 
     def set_image_bgr(self, bgr: np.ndarray) -> None:
         pix = np_bgr_to_qpixmap(bgr)
@@ -284,7 +285,8 @@ class SegmentationViewer(QMainWindow):
         self.addAction(act_save)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.statusBar().showMessage("準備就緒")
+        self.status = StatusFooter.install(self)
+        self.status.message("準備就緒")
 
         self._load_current_image(recompute=True)
 
@@ -335,32 +337,34 @@ class SegmentationViewer(QMainWindow):
             self._load_current_image(recompute=True)
         else:
             # 與 MediaExplorer 的清單統一，但分割檢視僅載入圖片
-            self.statusBar().showMessage(f"僅支援圖片檔案: {p.name}", 3000)
+            self.status.message_temp(f"僅支援圖片檔案：{p.name}", 3000)
 
     # ---- load / recompute ----
+
     def _load_current_image(self, recompute: bool = False) -> None:
         if not self.image_paths:
             return
         path = self.image_paths[self.idx]
         if recompute or path not in self.cache:
-            prog = QProgressDialog(f"分割中: {Path(path).name}", "取消", 0, 0, self)
-            prog.setWindowTitle("運算中")
-            prog.setModal(True)
-            prog.show()
+            # ★ 改用科幻彈窗，而非底部忙碌或 QProgressDialog
+            self.status.start_scifi(f"分割中：{Path(path).name}")
             try:
                 bgr, masks, scores = self.compute_masks_fn(
-                    path, int(self.params["points_per_side"]), float(self.params["pred_iou_thresh"])
+                    path,
+                    int(self.params["points_per_side"]),
+                    float(self.params["pred_iou_thresh"]),
                 )
             finally:
-                prog.close()
+                self.status.stop_scifi()
             masks = [(m > 0).astype(np.uint8) for m in masks]
             self.cache[path] = (bgr, masks, scores)
+
         self.selected_indices.clear()
         self._hover_idx = None
         self._update_canvas()
         self._update_selected_count()
         self._update_nav_buttons()
-        self.statusBar().showMessage(
+        self.status.message(
             f"載入完成：{Path(path).name}，共有 {len(self.cache[path][1])} 個候選遮罩"
         )
 
@@ -452,7 +456,7 @@ class SegmentationViewer(QMainWindow):
         bgr, masks, _ = self.cache[path]
         out_dir = QFileDialog.getExistingDirectory(self, "選擇儲存資料夾", str(Path(path).parent))
         if not out_dir:
-            self.statusBar().showMessage("取消儲存")
+            self.status.message("取消儲存")
             return
         out_dir = Path(out_dir)
         H, W = masks[0].shape
@@ -480,7 +484,7 @@ class SegmentationViewer(QMainWindow):
         if ok:
             out_path.write_bytes(buf.tobytes())
             QMessageBox.information(self, "完成", f"已儲存：\n{out_path}")
-            self.statusBar().showMessage("完成")
+            self.status.message("完成")
         else:
             QMessageBox.warning(self, "未儲存", "寫入失敗")
 
@@ -490,7 +494,7 @@ class SegmentationViewer(QMainWindow):
         use_bbox = self.crop_group.checkedId() == 1
         out_dir = QFileDialog.getExistingDirectory(self, "選擇儲存資料夾", str(Path(path).parent))
         if not out_dir:
-            self.statusBar().showMessage("取消儲存")
+            self.status.message("取消儲存")
             return
         out_dir = Path(out_dir)
         saved = 0
@@ -511,7 +515,7 @@ class SegmentationViewer(QMainWindow):
                 saved += 1
         if saved:
             QMessageBox.information(self, "完成", f"已儲存 {saved} 個物件")
-            self.statusBar().showMessage("完成")
+            self.status.message("完成")
         else:
             QMessageBox.warning(self, "未儲存", "沒有任何檔案被寫出")
 

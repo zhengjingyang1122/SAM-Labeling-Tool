@@ -102,9 +102,6 @@ def build_ui(win):
     rec_layout.addWidget(win.btn_rec_stop)
     rec_box.setLayout(rec_layout)
 
-    # 狀態列
-    win.status_label = QLabel("狀態: 待機")
-
     # 右側
     right_panel = QVBoxLayout()
     right_panel.addWidget(dir_box)
@@ -114,7 +111,7 @@ def build_ui(win):
     right_panel.addWidget(burst_box)
     right_panel.addWidget(rec_box)
     win.chk_preload_sam = QCheckBox("預先載入 SAM 模型")
-    right_panel.addWidget(win.chk_preload_sam)  # 建議放在分割工具 group 上方
+    right_panel.addWidget(win.chk_preload_sam)
     seg_box = QGroupBox("分割工具")
     seg_layout = QHBoxLayout()
     win.btn_auto_seg_image = QPushButton("自動分割影像")
@@ -124,7 +121,7 @@ def build_ui(win):
     seg_box.setLayout(seg_layout)
     right_panel.addWidget(seg_box)
     right_panel.addStretch(1)
-    right_panel.addWidget(win.status_label)
+    # 注意：不再把狀態 label 放在這裡（改由 StatusFooter 統一在整體視窗最下方）
 
     # 版面配置
     root = QHBoxLayout()

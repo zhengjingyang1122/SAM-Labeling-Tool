@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable, List, Optional
+from urllib.request import urlretrieve
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QDockWidget, QFileDialog, QMenu, QMessageBox, QProgressDialog
+from PySide6.QtWidgets import QDockWidget, QFileDialog, QMenu, QMessageBox
 
 from modules.segmentation_viewer import SegmentationViewer
 from modules.ui_state import update_ui_state
@@ -16,6 +17,10 @@ try:
     import modules.sam_engine as sam_engine_mod
 except Exception:
     sam_engine_mod = None
+
+DEFAULT_SAM_MODEL_TYPE = "vit_h"
+DEFAULT_SAM_CKPT = Path("./models/sam_vit_h_4b8939.pth")
+DEFAULT_SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
 
 
 # ---------------- 小工具 ----------------
@@ -94,42 +99,49 @@ class Actions:
         try:
             data = self.w.cam_combo.currentData()
             idx = data if isinstance(data, int) else self.w.cam_combo.currentIndex()
-            # 正確做法：先設定裝置，再只帶 widget 啟動
             try:
                 self.cam.set_selected_device_index(idx)
             except Exception:
                 pass
             self.cam.start(self.w.video_widget)
-            self.w.status_label.setText("狀態: 相機啟動")
+            self.w.status.message("狀態：相機啟動")
             update_ui_state(self.w)
         except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self.w, "相機啟動失敗", str(e))
 
     def stop_camera(self):
         try:
             self.cam.stop()
-            self.w.status_label.setText("狀態: 相機停止")
+            self.w.status.message("狀態：相機停止")
             update_ui_state(self.w)
         except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self.w, "相機停止失敗", str(e))
 
     def capture_image(self):
+        from pathlib import Path
+
         out_dir = Path(self.w.dir_edit.text())
         _ensure_dir(out_dir)
-        # 直接使用 photo 控制器
         if getattr(self.cam, "photo", None) is None:
+            from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.warning(self.w, "無法拍照", "相機尚未啟動或不支援拍照")
             return
         from utils.utils import build_snapshot_path
 
         path = build_snapshot_path(out_dir)
-        # 寫入並顯示
         try:
-            self.cam.photo._capture_with_retry(path)  # 與現有 PhotoCapture 保持一致
+            self.cam.photo._capture_with_retry(path)
             if hasattr(self.explorer, "refresh"):
                 self.explorer.refresh()
-            self.w.status_label.setText(f"狀態: 已拍照 -> {Path(path).name}")
+            self.w.status.message(f"狀態：已拍照 → {Path(path).name}")
         except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self.w, "拍照失敗", str(e))
 
     # -------------- 連拍 --------------
@@ -153,22 +165,28 @@ class Actions:
     # -------------- 錄影 --------------
 
     def resume_recording(self):
+        from pathlib import Path
+
         out_dir = Path(self.w.dir_edit.text())
         _ensure_dir(out_dir)
         if getattr(self.cam, "rec", None) is None:
+            from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.warning(self.w, "無法錄影", "相機尚未啟動或不支援錄影")
             return
         self.cam.rec.start_or_resume(out_dir)
         self.w.rec_ctrl = self.cam.rec
-        self.w.status_label.setText("狀態: 錄影中")
+        self.w.status.message("狀態：錄影中")
 
     def pause_recording(self):
         if getattr(self.w, "rec_ctrl", None) is None:
             return
         try:
             self.w.rec_ctrl.pause()
-            self.w.status_label.setText("狀態: 錄影暫停")
+            self.w.status.message("狀態：錄影暫停")
         except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self.w, "暫停錄影錯誤", str(e))
 
     def stop_recording(self):
@@ -176,28 +194,45 @@ class Actions:
             return
         try:
             self.w.rec_ctrl.stop()
-            self.w.status_label.setText("狀態: 錄影停止")
+            self.w.status.message("狀態：錄影停止")
             if hasattr(self.explorer, "refresh"):
                 self.explorer.refresh()
         except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+
             QMessageBox.critical(self.w, "停止錄影錯誤", str(e))
 
     # -------------- SAM 載入 --------------
 
+    # 【修改】優先使用預設路徑，否則詢問下載，同意才下載，否則回退檔案選取
     def _ensure_sam_loaded_interactive(self) -> bool:
-        """若 self.sam 未就緒，互動式要求 ckpt 並載入。"""
-        # 已有實例且可用
+        """若 self.sam 未就緒，優先使用預設 ckpt；無檔時詢問下載，同意後才下載並載入；最後才回退檔案選取。"""
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
         if _resolve_callable(self.sam, ["auto_masks_from_image"]):
             return True
-
         if sam_engine_mod is None or not hasattr(sam_engine_mod, "SamEngine"):
             QMessageBox.warning(
                 self.w, "無法載入", "找不到 SamEngine 類別，請確認 modules/sam_engine.py"
             )
             return False
 
-        # 先用上次的 ckpt；沒有再開對話框
         ckpt: Optional[Path] = self._last_ckpt
+
+        # 1) 嘗試使用預設路徑
+        if ckpt is None or not Path(ckpt).exists():
+            default = DEFAULT_SAM_CKPT
+            if default.exists():
+                ckpt = default
+            else:
+                # 2) 詢問是否下載，使用者同意就下載
+                maybe = self._download_sam_with_prompt()
+                if maybe is not None:
+                    ckpt = maybe
+
+        # 3) 若仍沒有 ckpt，回退到舊的檔案選取流程
         if ckpt is None or not Path(ckpt).exists():
             f, _ = QFileDialog.getOpenFileName(
                 self.w, "選擇 SAM 權重檔 .pth", str(Path.home()), "SAM Checkpoint (*.pth *.pt)"
@@ -207,24 +242,22 @@ class Actions:
             ckpt = Path(f)
 
         try:
-            model_type = "vit_h"  # 你可改由 UI 提供選擇
+            model_type = DEFAULT_SAM_MODEL_TYPE  # 預設使用 vit_h
             self.sam = sam_engine_mod.SamEngine(Path(ckpt), model_type=model_type)
-            prog = QProgressDialog("載入 SAM 模型中...", "取消", 0, 0, self.w)
-            prog.setWindowTitle("載入中")
-            prog.setModal(True)
-            prog.show()
+            self.w.status.start_scifi("載入 SAM 模型中...")
             self.sam.load()
-            prog.close()
+            self.w.status.stop_scifi("狀態：模型已載入")
             self._last_ckpt = Path(ckpt)
-            self.w.status_label.setText("狀態: 模型已載入")
             return True
         except Exception as e:
+            self.w.status.stop_scifi("狀態：模型載入失敗")
             QMessageBox.critical(self.w, "載入失敗", str(e))
             self.sam = None
             return False
 
     def toggle_preload_sam(self, checked: bool):
-        """勾選→載入模型；取消→釋放模型"""
+        from PySide6.QtWidgets import QMessageBox
+
         if checked:
             ok = self._ensure_sam_loaded_interactive()
             if not ok:
@@ -234,9 +267,17 @@ class Actions:
         else:
             try:
                 if self.sam and _resolve_callable(self.sam, ["unload"]):
-                    self.sam.unload()
-                self.w.status_label.setText("狀態: 模型已卸載")
+                    self.w.status.start_scifi("卸載 SAM 模型中...")
+                    try:
+                        self.sam.unload()
+                    finally:
+                        self.w.status.stop_scifi("狀態：模型已卸載")
+                else:
+                    self.w.status.message("狀態：模型已卸載")
+                self.sam = None
             except Exception as e:
+                # 萬一發生例外，關掉彈窗並提示
+                self.w.status.stop_scifi("狀態：模型卸載失敗")
                 QMessageBox.warning(self.w, "卸載警告", str(e))
 
     # -------------- 自動分割：彈出選單入口 --------------
@@ -415,3 +456,51 @@ class Actions:
         viewer.show()
         viewer.raise_()
         viewer.activateWindow()
+
+    def _download_sam_with_prompt(self) -> Optional[Path]:
+        from PySide6.QtWidgets import QMessageBox
+
+        dst = DEFAULT_SAM_CKPT
+        if dst.exists():
+            return dst
+
+        ret = QMessageBox.question(
+            self.w,
+            "下載 SAM 權重",
+            "找不到預設 SAM 權重檔:\nmodels/sam_vit_h_4b8939.pth\n\n要立即下載並儲存到 models/ 嗎？\n檔案約 2.5GB，時間視網路速度而定。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if ret != QMessageBox.Yes:
+            return None
+
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            self.w.status.start_scifi("下載 SAM 權重中...")
+
+            last_percent = -1
+
+            def hook(blocknum, blocksize, totalsize):
+                nonlocal last_percent
+                if totalsize > 0:
+                    percent = int(min(100, (blocknum * blocksize * 100) // totalsize))
+                    if percent != last_percent:
+                        last_percent = percent
+                        # 顯示百分比並讓 UI 及時更新
+                        self.w.status.set_scifi_progress(percent, f"下載 SAM 權重中... {percent}%")
+
+            urlretrieve(DEFAULT_SAM_URL, str(dst), reporthook=hook)
+            self.w.status.stop_scifi("狀態：SAM 權重下載完成")
+            return dst
+        except Exception as e:
+            self.w.status.stop_scifi("狀態：SAM 權重下載失敗")
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.critical(self.w, "下載失敗", str(e))
+            try:
+                # 下載失敗時清掉未完成檔
+                if dst.exists():
+                    dst.unlink()
+            except Exception:
+                pass
+            return None

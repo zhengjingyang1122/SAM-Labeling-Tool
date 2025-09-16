@@ -11,13 +11,14 @@ from modules.camera_manager import CameraManager
 from modules.explorer_controller import ExplorerController
 from modules.photo import PhotoCapture
 from modules.recorder import VideoRecorder
+from modules.status_footer import StatusFooter
 from modules.ui_main import build_ui, wire_ui
 from modules.ui_state import update_ui_state
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.setWindowTitle("Webcam Snapper - Modular Edition")
         self.resize(1100, 720)
 
@@ -29,6 +30,9 @@ class MainWindow(QMainWindow):
 
         # Build UI (widgets & layout only)
         build_ui(self)
+
+        self.status = StatusFooter.install(self)
+        self.status.message("狀態：待機")
 
         # Left dock: file explorer controller
         self.explorer_ctrl = ExplorerController(self, self.btn_toggle_explorer, self.dir_edit)
