@@ -48,6 +48,13 @@ class Actions:
         self.sam = sam_engine_instance  # 可為 None 或 SamEngine 實例
         self._last_ckpt: Optional[Path] = None
 
+        try:
+            dock = getattr(self.explorer, "explorer", None)
+            if dock is not None and hasattr(dock, "files_segment_requested"):
+                dock.files_segment_requested.connect(self.open_segmentation_for_file_list)
+        except Exception:
+            pass
+
     # -------------- 檔案/目錄 --------------
 
     def choose_dir(self):
@@ -306,7 +313,24 @@ class Actions:
 
     def _collect_images_from_dir(self, pivot: Path) -> List[Path]:
         exts = {".png", ".jpg", ".jpeg", ".bmp"}
-        return [p for p in sorted(pivot.parent.glob("*")) if p.suffix.lower() in exts]
+        return [
+            p for p in sorted(pivot.parent.glob("*")) if p.is_file() and p.suffix.lower() in exts
+        ]
+
+    @staticmethod
+    def _safe_resolve(p: Path) -> Path:
+        try:
+            return p.resolve()
+        except Exception:
+            return p
+
+    def _collect_images_with_pivot_first(self, pivot: Path) -> List[Path]:
+        """回傳同資料夾影像清單, 並將 pivot 排到第 1 筆"""
+        imgs = self._collect_images_from_dir(pivot) or []
+        pv = self._safe_resolve(pivot)
+        head = [p for p in imgs if self._safe_resolve(p) == pv]
+        tail = [p for p in imgs if self._safe_resolve(p) != pv]
+        return (head or [pivot]) + tail
 
     def _ensure_sam_available(self, interactive: bool = True) -> bool:
         """若還沒載入，interactive=True 會彈窗讓使用者選 ckpt 並載入。"""
@@ -358,9 +382,9 @@ class Actions:
         if not f:
             return
         path = Path(f)
-        imgs = self._collect_images_from_dir(path) or [path]
+        imgs = self._collect_images_with_pivot_first(path)
         compute_masks_fn = self._make_compute_fn_for_image()
-        self._open_view(imgs, compute_masks_fn, title="自動分割檢視（單一影像/同資料夾瀏覽）")
+        self._open_view(imgs, compute_masks_fn, title=f"自動分割檢視（{path.name}）")
 
     def open_segmentation_view_for_folder_prompt(self):
         if not self._ensure_sam_available(interactive=True):
@@ -370,11 +394,10 @@ class Actions:
             return
         folder = Path(d)
         exts = {".png", ".jpg", ".jpeg", ".bmp"}
-        imgs = [p for p in sorted(folder.glob("*")) if p.suffix.lower() in exts]
+        imgs = [p for p in sorted(folder.glob("*")) if p.is_file() and p.suffix.lower() in exts]
         if not imgs:
             QMessageBox.information(self.w, "沒有影像", "該資料夾內沒有支援格式的影像檔。")
             return
-        compute_masks_fn = self._make_compute_fn_for_image()
         compute_masks_fn = self._make_compute_fn_for_image()
 
         # 批次先建立/更新快取：已有 embedding 的影像會自動略過重算
@@ -408,7 +431,7 @@ class Actions:
             last = Path(f)
         else:
             last = Path(last)
-        imgs = self._collect_images_from_dir(last) or [last]
+        imgs = self._collect_images_with_pivot_first(last)
         compute_masks_fn = self._make_compute_fn_for_image()
         self._open_view(imgs, compute_masks_fn, title="自動分割檢視（上次拍攝影像）")
 
@@ -521,3 +544,17 @@ class Actions:
             except Exception:
                 pass
             return None
+
+    # 新增：由 Dock 多選觸發, 選幾張就開幾個視窗
+    def open_segmentation_for_file_list(self, paths: list[str]):
+        if not paths:
+            return
+        if not self._ensure_sam_available(interactive=True):
+            return
+        compute_masks_fn = self._make_compute_fn_for_image()  # 一次建立
+        for s in paths:
+            p = Path(s)
+            if not p.exists() or not p.is_file():
+                continue
+            imgs = self._collect_images_with_pivot_first(p)
+            self._open_view(imgs, compute_masks_fn, title=f"自動分割檢視（{p.name}）")

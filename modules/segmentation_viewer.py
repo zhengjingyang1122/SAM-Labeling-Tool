@@ -73,6 +73,7 @@ class ImageView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setMouseTracking(True)
         # 注意：狀態列改由 SegmentationViewer(QMainWindow) 安裝，這裡不要裝
+        self._spawned_views: list[SegmentationViewer] = []
 
     def set_image_bgr(self, bgr: np.ndarray) -> None:
         pix = np_bgr_to_qpixmap(bgr)
@@ -286,6 +287,7 @@ class SegmentationViewer(QMainWindow):
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.status = StatusFooter.install(self)
+        self._spawned_views: list[SegmentationViewer] = []
         self.status.message("準備就緒")
 
         self._load_current_image(recompute=True)
@@ -315,6 +317,7 @@ class SegmentationViewer(QMainWindow):
 
         # 與既有邏輯對接：沿用原本的雙擊行為
         explorer.tree.doubleClicked.connect(self._on_tree_double_clicked)
+        explorer.files_segment_requested.connect(self._open_new_view_for_files)
 
         # 若後續程式有用到 self.fs_model / self.tree，做相容別名
         self.left_dock = explorer
@@ -565,3 +568,41 @@ class SegmentationViewer(QMainWindow):
                         self._update_canvas()
                 return False
         return super().eventFilter(obj, event)
+
+    # 新增：在 SegmentationViewer 類別中加入兩個 helper
+    def _collect_images_with_pivot_first(self, pivot: Path) -> List[Path]:
+        exts = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
+        imgs = [
+            p for p in sorted(pivot.parent.glob("*")) if p.is_file() and p.suffix.lower() in exts
+        ]
+        pv = pivot.resolve() if hasattr(pivot, "resolve") else pivot
+        head = [p for p in imgs if (p.resolve() if hasattr(p, "resolve") else p) == pv]
+        tail = [p for p in imgs if (p.resolve() if hasattr(p, "resolve") else p) != pv]
+        return (head or [pivot]) + tail
+
+    def _open_new_view_for_files(self, paths: list[str]) -> None:
+        if not paths:
+            return
+        for s in paths:
+            p = Path(s)
+            if not p.exists() or not p.is_file():
+                continue
+            imgs = self._collect_images_with_pivot_first(p)
+            v = SegmentationViewer(
+                self.parent() if self.parent() else self,
+                imgs,
+                self.compute_masks_fn,
+                params_defaults=self.params,  # 沿用當前視窗設定
+                title=f"自動分割檢視（{p.name}）",
+            )
+            v.setAttribute(Qt.WA_DeleteOnClose, True)
+            self._spawned_views.append(v)
+
+            def _drop_ref(*_):
+                try:
+                    self._spawned_views.remove(v)
+                except ValueError:
+                    pass
+
+            v.destroyed.connect(_drop_ref)
+            v.show()

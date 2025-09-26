@@ -28,6 +28,7 @@ class MediaExplorer(QDockWidget):
 
     file_deleted = Signal(str)  # 送出被刪除檔案的絕對路徑
     file_renamed = Signal(str, str)  # (old_abs_path, new_abs_path)
+    files_segment_requested = Signal(list)  # 多選影像欲執行自動分割時發出
 
     def __init__(self, parent=None, name_filters: Optional[List[str]] = None):
         super().__init__("媒體檔案", parent)
@@ -52,6 +53,7 @@ class MediaExplorer(QDockWidget):
         self.action_refresh = QAction("重新整理", self.toolbar)
         self.action_delete = QAction("刪除", self.toolbar)
         self.action_rename = QAction("重新命名", self.toolbar)
+        self.action_segment = QAction("自動分割", self.toolbar)
 
         self.toolbar.addAction(self.action_refresh)
         self.toolbar.addSeparator()
@@ -84,6 +86,7 @@ class MediaExplorer(QDockWidget):
         self.action_refresh.triggered.connect(self.refresh)
         self.action_delete.triggered.connect(self.delete_selected)
         self.action_rename.triggered.connect(self.rename_selected)
+        self.action_segment.triggered.connect(self._emit_segment_selected)
 
     # ----------------------
     # 公開 API
@@ -177,10 +180,13 @@ class MediaExplorer(QDockWidget):
     # ----------------------
     # 右鍵選單
     # ----------------------
-
+    # 修改右鍵選單：在選到影像時出現「自動分割」
     def _on_context_menu(self, pos: QPoint):
         menu = QMenu(self)
         menu.addAction(self.action_refresh)
+        img_files = self._selected_image_files()
+        if img_files:
+            menu.addAction(self.action_segment)  # ← 新增
         menu.addSeparator()
         menu.addAction(self.action_rename)
         menu.addAction(self.action_delete)
@@ -205,3 +211,20 @@ class MediaExplorer(QDockWidget):
             return None
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return str(files[0])
+
+    def _selected_image_files(self) -> List[Path]:
+        exts = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".gif", ".webp"}
+        sel = self.tree.selectionModel().selectedIndexes()
+        rows = [idx for idx in sel if idx.column() == 0]  # 只取檔名欄
+        out = []
+        for idx in rows:
+            p = Path(self.model.filePath(idx))
+            if p.is_file() and p.suffix.lower() in exts:
+                out.append(p)
+        return out
+
+    # 新增：觸發 Signal
+    def _emit_segment_selected(self):
+        files = self._selected_image_files()
+        if files:
+            self.files_segment_requested.emit([str(p) for p in files])
