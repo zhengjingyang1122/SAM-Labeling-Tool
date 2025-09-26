@@ -282,25 +282,19 @@ class Actions:
 
     # -------------- 自動分割：彈出選單入口 --------------
 
+    # 取代原 open_auto_segment_menu
     def open_auto_segment_menu(self):
         btn = getattr(self.w, "btn_auto_seg_image", None)
         menu = QMenu(self.w)
 
         act_single = QAction("自動分割：選擇單一影像...", self.w)
-        act_folder = QAction("自動分割：瀏覽資料夾...", self.w)
-        act_last = QAction("自動分割：使用上次拍攝影像", self.w)
-        act_video = QAction("自動分割：選擇影片（取第一幀）...", self.w)
+        act_folder = QAction("自動分割：瀏覽資料夾（批次）...", self.w)
 
         act_single.triggered.connect(self.open_segmentation_view_for_chosen_image)
         act_folder.triggered.connect(self.open_segmentation_view_for_folder_prompt)
-        act_last.triggered.connect(self.open_segmentation_view_for_last_photo)
-        act_video.triggered.connect(self.open_segmentation_view_for_video_file)
 
         menu.addAction(act_single)
         menu.addAction(act_folder)
-        menu.addAction(act_last)
-        menu.addSeparator()
-        menu.addAction(act_video)
 
         if btn is not None:
             pos: QPoint = btn.mapToGlobal(btn.rect().bottomLeft())
@@ -326,9 +320,16 @@ class Actions:
             )
             return False
 
+    # 取代原 _make_compute_fn_for_image
     def _make_compute_fn_for_image(self):
         if not self._ensure_sam_available(interactive=True):
             raise RuntimeError("已取消載入 SAM 模型")
+        # 優先使用快取版
+        fn_cached = getattr(self.sam, "auto_masks_from_image_cached", None)
+        if callable(fn_cached):
+            return lambda img_path, points_per_side, pred_iou_thresh: fn_cached(
+                img_path, points_per_side=points_per_side, pred_iou_thresh=pred_iou_thresh
+            )
         fn = getattr(self.sam, "auto_masks_from_image", None)
         if not callable(fn):
             raise RuntimeError("目前的 SamEngine 不支援 auto_masks_from_image")
@@ -374,6 +375,22 @@ class Actions:
             QMessageBox.information(self.w, "沒有影像", "該資料夾內沒有支援格式的影像檔。")
             return
         compute_masks_fn = self._make_compute_fn_for_image()
+        compute_masks_fn = self._make_compute_fn_for_image()
+
+        # 批次先建立/更新快取：已有 embedding 的影像會自動略過重算
+        try:
+            self.w.status.start_scifi("批次分割中：建立快取與 embedding")
+            for p in imgs:
+                try:
+                    # 與檢視器一致的預設參數
+                    self.sam.auto_masks_from_image_cached(
+                        p, points_per_side=32, pred_iou_thresh=0.88
+                    )
+                except Exception:
+                    pass
+        finally:
+            self.w.status.stop_scifi()
+
         self._open_view(imgs, compute_masks_fn, title=f"自動分割檢視（{folder.name}）")
 
     def open_segmentation_view_for_last_photo(self):

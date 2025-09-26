@@ -21,4 +21,3 @@ def update_ui_state(win):
     win.btn_rec_stop.setEnabled(cam_active)
 
     win.btn_auto_seg_image.setEnabled(True)  # 有最近照片時可用，沒照片按了會提示
-    win.btn_auto_seg_video.setEnabled(True)  # 同理

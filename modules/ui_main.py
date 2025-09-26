@@ -114,10 +114,8 @@ def build_ui(win):
     right_panel.addWidget(win.chk_preload_sam)
     seg_box = QGroupBox("分割工具")
     seg_layout = QHBoxLayout()
-    win.btn_auto_seg_image = QPushButton("自動分割影像")
-    win.btn_auto_seg_video = QPushButton("自動分割影片")
+    win.btn_auto_seg_image = QPushButton("自動分割")
     seg_layout.addWidget(win.btn_auto_seg_image)
-    seg_layout.addWidget(win.btn_auto_seg_video)
     seg_box.setLayout(seg_layout)
     right_panel.addWidget(seg_box)
     right_panel.addStretch(1)
@@ -128,6 +126,49 @@ def build_ui(win):
     root.addWidget(win.video_widget, 2)
     root.addLayout(right_panel, 1)
     central.setLayout(root)
+
+    # 在建立完各元件後加入 ToolTip
+    win.btn_start_cam.setToolTip("啟動相機並顯示預覽")
+    win.btn_stop_cam.setToolTip("停止相機")
+    win.btn_capture.setToolTip("立即拍一張快照 Space")
+    win.burst_count.setToolTip("要連續拍攝的張數")
+    win.burst_interval.setToolTip("每張之間的間隔 毫秒")
+    win.btn_start_burst.setToolTip("開始連拍")
+    win.btn_stop_burst.setToolTip("停止連拍")
+    win.btn_rec_resume.setToolTip("開始或繼續錄影 R")
+    win.btn_rec_pause.setToolTip("暫停錄影")
+    win.btn_rec_stop.setToolTip("停止並儲存錄影 Shift+R")
+    win.btn_auto_seg_image.setToolTip("對影像執行自動分割")
+
+    # 輕微調整版面間距
+    right_panel.setSpacing(8)
+    root = win.centralWidget().layout()
+    root.setSpacing(12)
+
+    # ToolTips
+    win.dir_edit.setToolTip("輸出影像與影片的儲存路徑")
+    win.btn_browse.setToolTip("選擇輸出資料夾")
+    win.cam_combo.setToolTip("選擇要使用的相機裝置")
+    win.btn_refresh_cam.setToolTip("重新掃描相機裝置")
+    win.btn_start_cam.setToolTip("啟動相機預覽")
+    win.btn_stop_cam.setToolTip("停止相機預覽")
+    win.btn_capture.setToolTip("拍一張快照 Space")
+    win.burst_count.setToolTip("連拍張數")
+    win.burst_interval.setToolTip("每張間隔 毫秒")
+    win.btn_start_burst.setToolTip("開始連拍")
+    win.btn_stop_burst.setToolTip("停止連拍")
+    win.btn_rec_resume.setToolTip("開始或繼續錄影 R")
+    win.btn_rec_pause.setToolTip("暫停錄影")
+    win.btn_rec_stop.setToolTip("停止錄影 Shift+R")
+    win.chk_preload_sam.setToolTip("預先載入 SAM 權重以加速第一次分割")
+    win.btn_auto_seg_image.setToolTip(
+        "自動分割：可選單一影像或整個資料夾；已建立 embedding 的影像將略過重新分割"
+    )
+
+    # 微調間距
+    right_panel.setSpacing(8)
+    root = win.centralWidget().layout()
+    root.setSpacing(12)
 
 
 def wire_ui(win, actions):
@@ -143,5 +184,5 @@ def wire_ui(win, actions):
     win.btn_rec_pause.clicked.connect(actions.pause_recording)
     win.btn_rec_stop.clicked.connect(actions.stop_recording)
     win.btn_auto_seg_image.clicked.connect(actions.open_auto_segment_menu)
-    win.btn_auto_seg_video.clicked.connect(actions.open_segmentation_view_for_last_video)
+
     win.chk_preload_sam.toggled.connect(actions.toggle_preload_sam)

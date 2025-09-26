@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtCore import QSettings
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from modules.actions import Actions
 from modules.burst import BurstShooter
@@ -41,10 +43,77 @@ class MainWindow(QMainWindow):
         self.ui_actions = Actions(self, self.cam, self.explorer_ctrl)
         wire_ui(self, self.ui_actions)
 
+        # ✅ 加入全域樣式、快捷鍵、說明選單、首次導覽
+        self._apply_global_style()
+        self._setup_shortcuts()
+        self._install_help_menu()
+        self._maybe_run_onboarding()
+
         # Initial state & device list
         update_ui_state(self)
         self.explorer_ctrl.refresh()
         self.ui_actions.populate_camera_devices()
+
+    # 新增到 MainWindow 類別內
+    def _apply_global_style(self):
+        # 輕量現代化樣式表(Stylesheet), 不影響既有 SciFi 對話框
+        self.setStyleSheet(
+            """
+        QWidget { font-size: 12px; }
+        QGroupBox {
+            margin-top: 10px; padding: 8px; border: 1px solid #3a3f47; border-radius: 8px;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin; subcontrol-position: top left; padding: 0 6px;
+            color: #cfd8dc; font-weight: 600;
+        }
+        QPushButton {
+            padding: 6px 10px; border: 1px solid #3a3f47; border-radius: 6px;
+            background: #2b2f36; color: #e8eaed;
+        }
+        QPushButton:hover { background: #333844; }
+        QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+            border: 1px solid #3a3f47; border-radius: 6px; padding: 4px 6px; background: #1b1e23; color: #e8eaed;
+        }
+        """
+        )
+
+    def _setup_shortcuts(self):
+        # 快捷鍵(Shortcut)
+        QShortcut(QKeySequence("Space"), self, activated=self.ui_actions.capture_image)
+        QShortcut(QKeySequence("R"), self, activated=self.ui_actions.resume_recording)
+        QShortcut(QKeySequence("Shift+R"), self, activated=self.ui_actions.stop_recording)
+
+    def _install_help_menu(self):
+        m = self.menuBar().addMenu("說明")
+        act_tour = QAction("快速導覽", self)
+        act_tour.triggered.connect(self._show_onboarding)
+        act_keys = QAction("鍵盤快捷鍵", self)
+
+        def _show_keys():
+            QMessageBox.information(
+                self, "鍵盤快捷鍵", "Space: 拍照\nR: 開始/繼續錄影\nShift+R: 停止錄影"
+            )
+
+        act_keys.triggered.connect(_show_keys)
+        m.addAction(act_tour)
+        m.addAction(act_keys)
+
+    def _maybe_run_onboarding(self):
+        s = QSettings("VersaLab", "WebcamSnapper")
+        first = s.value("onboarded", False, type=bool) is False
+        if first:
+            self._show_onboarding(first_run=True)
+            s.setValue("onboarded", True)
+
+    def _show_onboarding(self, first_run: bool = False):
+        try:
+            from modules.onboarding import OnboardingWizard
+
+            wiz = OnboardingWizard(self)
+            wiz.exec()
+        except Exception as e:
+            QMessageBox.information(self, "導覽", f"導覽載入失敗: {e}")
 
 
 def main():

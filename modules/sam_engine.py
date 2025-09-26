@@ -1,11 +1,10 @@
-# modules/sam_engine.py 內【新增匯入或方法】（只列新增/修改段）
-# 【2】第三方安裝
+# modules/sam_engine.py
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
-from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
+from segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
 
 
 class SamEngine:
@@ -60,3 +59,67 @@ class SamEngine:
 
     def is_loaded(self) -> bool:
         return self._sam is not None
+
+    # 加到 SamEngine 類別內
+
+    def embedding_path_for(self, img_path: Path) -> Path:
+        p = Path(img_path)
+        return p.with_suffix(p.suffix + ".sam_embed.npz")
+
+    def masks_cache_path_for(self, img_path: Path) -> Path:
+        p = Path(img_path)
+        return p.with_suffix(p.suffix + ".sam_masks.npz")
+
+    def has_embedding(self, img_path: Path) -> bool:
+        return self.embedding_path_for(img_path).exists()
+
+    # 加到 SamEngine 類別內
+
+    def auto_masks_from_image_cached(
+        self, img_path: Path, points_per_side=32, pred_iou_thresh=0.88
+    ):
+        self._ensure_loaded()
+        img_path = Path(img_path)
+        mask_p = self.masks_cache_path_for(img_path)
+
+        # 1) 有快取就直接讀
+        if mask_p.exists():
+            data = np.load(str(mask_p), allow_pickle=True)
+            bgr = cv2.imread(str(img_path))
+            masks_arr = data["masks"]  # shape: [N, H, W], uint8
+            masks = [masks_arr[i].astype(np.uint8) for i in range(masks_arr.shape[0])]
+            scores = data["scores"].astype(np.float32).tolist()
+            return bgr, masks, scores
+
+        # 2) 沒有快取就計算
+        bgr, masks, scores = self.auto_masks_from_image(
+            img_path, points_per_side=points_per_side, pred_iou_thresh=pred_iou_thresh
+        )
+
+        # 2a) 寫出 masks 快取
+        np.savez_compressed(
+            str(mask_p),
+            masks=np.array(masks, dtype=np.uint8),
+            scores=np.array(scores, dtype=np.float32),
+        )
+
+        # 2b) 嘗試寫出 embedding（即使失敗也不影響使用）
+        try:
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            predictor = SamPredictor(self._sam)
+            predictor.set_image(rgb)
+            emb = predictor.get_image_embedding().cpu().numpy()
+            original_size = np.array(predictor.original_size, dtype=np.int32)
+            input_size = np.array(predictor.input_size, dtype=np.int32)
+            emb_p = self.embedding_path_for(img_path)
+            np.savez_compressed(
+                str(emb_p),
+                embedding=emb.astype(np.float32),
+                original_size=original_size,
+                input_size=input_size,
+                image_shape=np.array(rgb.shape[:2], dtype=np.int32),
+            )
+        except Exception:
+            pass
+
+        return bgr, masks, scores
