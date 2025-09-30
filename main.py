@@ -12,6 +12,7 @@ from modules.burst import BurstShooter
 from modules.camera_manager import CameraManager
 from modules.explorer_controller import ExplorerController
 from modules.photo import PhotoCapture
+from modules.prefs import get_prefs
 from modules.recorder import VideoRecorder
 from modules.shortcuts import get_app_shortcut_manager
 from modules.status_footer import StatusFooter
@@ -55,6 +56,25 @@ class MainWindow(QMainWindow):
         update_ui_state(self)
         self.explorer_ctrl.refresh()
         self.ui_actions.populate_camera_devices()
+
+        prefs = get_prefs()
+        out_dir = prefs.get("output_dir", "")
+        if out_dir:
+            try:
+                self.dir_edit.setText(out_dir)
+                self.explorer_ctrl.set_root(out_dir)
+            except Exception:
+                pass
+
+        # 相機偏好可在裝置掃描完成後套用
+        # 假設 actions 或 camera_manager 有 refresh_devices()
+        try:
+            want = prefs.get("camera.preferred_device", "")
+            if want:
+                self.ui_actions.select_camera_by_name(want)  # 需在 Actions 補這個 helper, 見下方
+        except Exception:
+            pass
+        self.dir_edit.editingFinished.connect(lambda: prefs.set("output_dir", self.dir_edit.text()))
 
     # 新增到 MainWindow 類別內
     def _apply_global_style(self):

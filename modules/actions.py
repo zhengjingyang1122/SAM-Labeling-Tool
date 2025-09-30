@@ -7,8 +7,9 @@ from urllib.request import urlretrieve
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QDockWidget, QFileDialog, QMenu, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox
 
+from modules.prefs import get_prefs
 from modules.segmentation_viewer import SegmentationViewer
 from modules.ui_state import update_ui_state
 
@@ -52,6 +53,28 @@ class Actions:
             dock = getattr(self.explorer, "explorer", None)
             if dock is not None and hasattr(dock, "files_segment_requested"):
                 dock.files_segment_requested.connect(self.open_segmentation_for_file_list)
+        except Exception:
+            pass
+        self._prefs = get_prefs()
+        self.default_params = {
+            "points_per_side": self._prefs.get("sam.points_per_side", 32),
+            "pred_iou_thresh": self._prefs.get("sam.pred_iou_thresh", 0.88),
+        }
+
+    def _on_output_dir_changed(self, path: str) -> None:
+        try:
+            self._prefs.set("output_dir", path)
+        except Exception:
+            pass
+
+    # 供 main.py 用名稱選定裝置
+    def select_camera_by_name(self, name: str) -> None:
+        try:
+            cb = self.w.ui.camera_combo  # 依你的 UI 命名替換
+            for i in range(cb.count()):
+                if cb.itemText(i) == name:
+                    cb.setCurrentIndex(i)
+                    break
         except Exception:
             pass
 
@@ -112,6 +135,12 @@ class Actions:
                 pass
             self.cam.start(self.w.video_widget)
             self.w.status.message("狀態：相機啟動")
+            try:
+                name = self.w.cam_combo.currentText()
+                self._prefs.set("camera.preferred_device", name)
+            except Exception:
+                pass
+
             update_ui_state(self.w)
         except Exception as e:
             from PySide6.QtWidgets import QMessageBox
@@ -405,9 +434,10 @@ class Actions:
             self.w.status.start_scifi("批次分割中：建立快取與 embedding")
             for p in imgs:
                 try:
-                    # 與檢視器一致的預設參數
+                    pps = self._prefs.get("sam.points_per_side", 32)
+                    iou = self._prefs.get("sam.pred_iou_thresh", 0.88)
                     self.sam.auto_masks_from_image_cached(
-                        p, points_per_side=32, pred_iou_thresh=0.88
+                        p, points_per_side=pps, pred_iou_thresh=iou
                     )
                 except Exception:
                     pass
@@ -469,15 +499,19 @@ class Actions:
         # 保留視窗引用，避免被 GC
         if not hasattr(self, "_seg_windows"):
             self._seg_windows = []
+        params = {
+            "points_per_side": self._prefs.get("sam.points_per_side", 32),
+            "pred_iou_thresh": self._prefs.get("sam.pred_iou_thresh", 0.88),
+            "union_morph_enabled": self._prefs.get("viewer.union_morph.enabled", True),
+            "union_morph_scale": self._prefs.get("viewer.union_morph.scale", 0.003),
+            "fit_on_open": self._prefs.get("viewer.fit_on_open", True),
+        }
 
         viewer = SegmentationViewer(
             None,  # 原本是 None，改成主視窗作為父層
             image_paths,
             compute_masks_fn,
-            params_defaults={
-                "points_per_side": 32,
-                "pred_iou_thresh": 0.88,
-            },
+            params_defaults=params,
             title=title,
         )
         viewer.setAttribute(Qt.WA_DeleteOnClose, True)

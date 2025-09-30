@@ -59,19 +59,18 @@ def compute_bbox(mask: np.ndarray) -> Tuple[int, int, int, int]:
 
 
 class ImageView(QGraphicsView):
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self._pix_item: Optional[QGraphicsPixmapItem] = None
         self.setRenderHints(
-            self.renderHints()
-            | QPainter.RenderHint.Antialiasing
-            | QPainter.RenderHint.SmoothPixmapTransform
+            self.renderHints() | QPainter.Antialiasing | QPainter.SmoothPixmapTransform
         )
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
-        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
+        self.setDragMode(QGraphicsView.NoDrag)
         self.setMouseTracking(True)
 
     def set_image_bgr(self, bgr: np.ndarray) -> None:
@@ -266,6 +265,7 @@ class SegmentationViewer(QMainWindow):
         self.btn_apply_params.clicked.connect(self._apply_params)
         self.btn_prev.clicked.connect(self._prev_image)
         self.btn_next.clicked.connect(self._next_image)
+        self.btn_save_selected.clicked.connect(self._save_selected)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.status = StatusFooter.install(self)
@@ -359,9 +359,27 @@ class SegmentationViewer(QMainWindow):
         )
 
     def _apply_params(self) -> None:
-        self.params["points_per_side"] = int(self.spn_points.value())
-        self.params["pred_iou_thresh"] = float(self.spn_iou.value())
+        pps = int(self.spn_points.value())
+        iou = float(self.spn_iou.value())
+        self.params["points_per_side"] = pps
+        self.params["pred_iou_thresh"] = iou
+
+        morph_on = bool(self.chk_union_morph.isChecked())
+        morph_scale = float(self.dbl_morph_scale.value())
+        self.params["union_morph_enabled"] = morph_on
+        self.params["union_morph_scale"] = morph_scale
         self._load_current_image(recompute=True)
+
+        # 寫回偏好
+        self.prefs.set("sam.points_per_side", pps)
+        self.prefs.set("sam.pred_iou_thresh", iou)
+        self.prefs.set("viewer.union_morph.enabled", morph_on)
+        self.prefs.set("viewer.union_morph.scale", morph_scale)
+        self.status.message_temp("參數已套用且儲存為偏好", 1800)
+
+    # 若你有「視圖置入」按鈕或勾選, 也寫回
+    def on_fit_on_open_toggled(self, on: bool):
+        self.prefs.set("viewer.fit_on_open", bool(on))
 
     # ---- navigation ----
     def _update_nav_buttons(self) -> None:
@@ -603,3 +621,9 @@ class SegmentationViewer(QMainWindow):
             v.show()
             v.raise_()
             v.activateWindow()
+
+    def save_union_hotkey(self):
+        if not self.selected_indices:
+            QMessageBox.information(self, "提示", "尚未選擇任何目標")
+            return
+        self._save_union(sorted(self.selected_indices))

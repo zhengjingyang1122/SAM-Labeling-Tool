@@ -110,7 +110,7 @@ class ShortcutManager:
             ("viewer", "nav.prev"): viewer._prev_image,
             ("viewer", "nav.next"): viewer._next_image,
             ("viewer", "save.selected"): viewer._save_selected,
-            ("viewer", "save.union"): viewer._save_union,
+            ("viewer", "save.union"): viewer.save_union_hotkey,
             ("viewer", "dock.toggle"): viewer.act_toggle_dock,  # QAction
             ("viewer", "window.close"): viewer.close,
         }
