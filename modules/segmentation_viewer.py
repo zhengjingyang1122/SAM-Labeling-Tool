@@ -72,8 +72,6 @@ class ImageView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setMouseTracking(True)
-        # 注意：狀態列改由 SegmentationViewer(QMainWindow) 安裝，這裡不要裝
-        self._spawned_views: list[SegmentationViewer] = []
 
     def set_image_bgr(self, bgr: np.ndarray) -> None:
         pix = np_bgr_to_qpixmap(bgr)
@@ -256,31 +254,28 @@ class SegmentationViewer(QMainWindow):
 
         # 檢視選單：提供顯示/隱藏 Dock（F9）
         self.menuView = self.menuBar().addMenu("檢視")
-        self.act_toggle_dock = self.left_dock.toggleViewAction()
-        self.act_toggle_dock.setText("檔案視窗 (F9)")
-        self.act_toggle_dock.setShortcut("F9")
+        self.act_toggle_dock.setText("檔案視窗")
         self.menuView.addAction(self.act_toggle_dock)
 
         # connect
+        self.btn_reset_view.clicked.connect(self.view.reset_view)
+        self.btn_apply_params.clicked.connect(self._apply_params)
         self.btn_prev.clicked.connect(self._prev_image)
         self.btn_next.clicked.connect(self._next_image)
-        self.btn_reset_view.clicked.connect(self.view.reset_view)
-        self.btn_save_selected.clicked.connect(self._save_selected)
-        self.btn_apply_params.clicked.connect(self._apply_params)
 
         # shortcuts
         act_prev = QAction(self)
-        act_prev.setShortcut("Left")
+
         act_prev.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         act_prev.triggered.connect(self._prev_image)
         self.addAction(act_prev)
         act_next = QAction(self)
-        act_next.setShortcut("Right")
+
         act_next.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         act_next.triggered.connect(self._next_image)
         self.addAction(act_next)
         act_save = QAction(self)
-        act_save.setShortcut("S")
+
         act_save.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         act_save.triggered.connect(self._save_selected)
         self.addAction(act_save)
@@ -323,6 +318,7 @@ class SegmentationViewer(QMainWindow):
         self.left_dock = explorer
         self.fs_model = explorer.model
         self.tree = explorer.tree
+        self.act_toggle_dock = self.left_dock.toggleViewAction()
 
     def _on_tree_double_clicked(self, index) -> None:
         p = Path(self.fs_model.filePath(index))
@@ -569,10 +565,7 @@ class SegmentationViewer(QMainWindow):
                 if tgt is None:
                     return False
                 if event.button() == Qt.MouseButton.LeftButton:
-                    if tgt in self.selected_indices:
-                        self.selected_indices.remove(tgt)
-                    else:
-                        self.selected_indices.add(tgt)
+                    self.selected_indices.add(tgt)
                     self._update_selected_count()
                     self._update_canvas()
                 elif event.button() == Qt.MouseButton.RightButton:
@@ -603,13 +596,14 @@ class SegmentationViewer(QMainWindow):
                 continue
             imgs = self._collect_images_with_pivot_first(p)
             v = SegmentationViewer(
-                self.parent() if self.parent() else self,
+                None,  # 改為獨立最上層視窗
                 imgs,
                 self.compute_masks_fn,
                 params_defaults=self.params,  # 沿用當前視窗設定
                 title=f"自動分割檢視（{p.name}）",
             )
             v.setAttribute(Qt.WA_DeleteOnClose, True)
+            v.setWindowFlag(Qt.Window, True)
             self._spawned_views.append(v)
 
             def _drop_ref(*_):
@@ -620,3 +614,5 @@ class SegmentationViewer(QMainWindow):
 
             v.destroyed.connect(_drop_ref)
             v.show()
+            v.raise_()
+            v.activateWindow()

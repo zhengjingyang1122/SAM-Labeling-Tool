@@ -471,7 +471,7 @@ class Actions:
             self._seg_windows = []
 
         viewer = SegmentationViewer(
-            self.w,  # 原本是 None，改成主視窗作為父層
+            None,  # 原本是 None，改成主視窗作為父層
             image_paths,
             compute_masks_fn,
             params_defaults={
@@ -481,6 +481,7 @@ class Actions:
             title=title,
         )
         viewer.setAttribute(Qt.WA_DeleteOnClose, True)
+        viewer.setWindowFlag(Qt.Window, True)
 
         # 視窗關閉時，移除引用
         def _drop_ref(*_):

@@ -4,7 +4,7 @@ import sys
 from typing import Optional
 
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QAction, QKeySequence, QShortcut
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from modules.actions import Actions
@@ -45,7 +45,6 @@ class MainWindow(QMainWindow):
 
         # ✅ 加入全域樣式、快捷鍵、說明選單、首次導覽
         self._apply_global_style()
-        self._setup_shortcuts()
         self._install_help_menu()
         self._maybe_run_onboarding()
 
@@ -77,12 +76,6 @@ class MainWindow(QMainWindow):
         }
         """
         )
-
-    def _setup_shortcuts(self):
-        # 快捷鍵(Shortcut)
-        QShortcut(QKeySequence("Space"), self, activated=self.ui_actions.capture_image)
-        QShortcut(QKeySequence("R"), self, activated=self.ui_actions.resume_recording)
-        QShortcut(QKeySequence("Shift+R"), self, activated=self.ui_actions.stop_recording)
 
     def _install_help_menu(self):
         m = self.menuBar().addMenu("說明")
