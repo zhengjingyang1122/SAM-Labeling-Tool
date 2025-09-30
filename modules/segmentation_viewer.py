@@ -357,6 +357,10 @@ class SegmentationViewer(QMainWindow):
                     int(self.params["points_per_side"]),
                     float(self.params["pred_iou_thresh"]),
                 )
+                H, W = bgr.shape[:2]
+                self.status.set_image_resolution(W, H)
+                self.status.set_cursor_xy(None, None)  # 先清空游標座標
+
             finally:
                 self.status.stop_scifi()
             masks = [(m > 0).astype(np.uint8) for m in masks]
@@ -467,6 +471,14 @@ class SegmentationViewer(QMainWindow):
         for i in indices:
             if 0 <= i < len(masks):
                 union = np.maximum(union, (masks[i] > 0).astype(np.uint8))
+
+        u = (union * 255).astype(np.uint8)
+        k = max(3, int(round(min(H, W) * 0.003)) | 1)  # 隨影像大小自適應，且為奇數
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        u = cv2.morphologyEx(u, cv2.MORPH_OPEN, kernel, iterations=1)
+        u = cv2.morphologyEx(u, cv2.MORPH_CLOSE, kernel, iterations=1)
+        union = (u > 127).astype(np.uint8)
+
         # 最大連通（排除非目標碎片）
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(union, connectivity=8)
         if num_labels > 1:
@@ -536,12 +548,14 @@ class SegmentationViewer(QMainWindow):
                     if self._hover_idx is not None:
                         self._hover_idx = None
                         self._update_canvas()
+                    self.status.set_cursor_xy(None, None)  # 清空
                 else:
                     x, y = img_xy
                     path = self.image_paths[self.idx]
                     _, masks, _ = self.cache[path]
                     self._hover_idx = self._hit_test_xy(masks, x, y)
                     self._update_canvas()
+                    self.status.set_cursor_xy(x, y)  # 即時更新游標座標
                 return False
             if event.type() == QEvent.MouseButtonPress:
                 pos = _pt(event)

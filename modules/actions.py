@@ -251,7 +251,7 @@ class Actions:
         try:
             model_type = DEFAULT_SAM_MODEL_TYPE  # 預設使用 vit_h
             self.sam = sam_engine_mod.SamEngine(Path(ckpt), model_type=model_type)
-            self.w.status.start_scifi("載入 SAM 模型中...")
+            self.w.status.start_scifi_simulated("載入 SAM 模型中...", start=25, stop_at=99)
             self.sam.load()
             self.w.status.stop_scifi("狀態：模型已載入")
             self._last_ckpt = Path(ckpt)

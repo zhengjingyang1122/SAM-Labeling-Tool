@@ -81,6 +81,21 @@ class StatusFooter(QStatusBar):
         # 科幻彈窗指標
         self._scifi: Optional[SciFiProgressDialog] = None
 
+        self._meta = QLabel("", self)
+        self._meta.setObjectName("StatusMetaLabel")
+        self._meta.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.addPermanentWidget(self._meta, 0)
+
+        self._img_wh = None
+        self._cur_xy = None
+
+        self._sim_timer = QTimer(self)
+        self._sim_timer.setInterval(60)
+        self._sim_timer.timeout.connect(self._on_sim_tick)
+        self._sim_value = 0
+        self._sim_target = 0
+        self._sim_step = 1
+
     # ---------- 公開 API ----------
     def message(self, text: str) -> None:
         self._last_persist_msg = text
@@ -153,17 +168,68 @@ class StatusFooter(QStatusBar):
 
     def stop_scifi(self, text: Optional[str] = None) -> None:
         try:
+            if self._sim_timer.isActive():
+                self._sim_timer.stop()
             if self._scifi:
-                self._scifi.close()
-
-                # ★ 新增：關閉後刷一次，馬上恢復底部狀態訊息
+                try:
+                    self._scifi.set_determinate(100)
+                except Exception:
+                    pass
                 from PySide6.QtGui import QGuiApplication
 
                 QGuiApplication.processEvents()
+                self._scifi.close()
         finally:
             self._scifi = None
             if text is not None:
                 self.message(text)
+
+    # 顯示影像寬高與游標座標（供 SegmentationViewer 呼叫）
+    def set_image_resolution(self, w: int, h: int) -> None:
+        self._img_wh = (w, h)
+        self._update_meta()
+
+    def set_cursor_xy(self, x: int | None, y: int | None) -> None:
+        self._cur_xy = None if x is None or y is None else (x, y)
+        self._update_meta()
+
+    def _update_meta(self) -> None:
+        parts = []
+        if self._img_wh:
+            parts.append(f"{self._img_wh[0]}x{self._img_wh[1]}")
+        if self._cur_xy:
+            parts.append(f"({self._cur_xy[0]},{self._cur_xy[1]})")
+        self._meta.setText(" | ".join(parts))
+
+    # 模擬載入進度：從 25% 慢慢跑到 99%，等待實際完成後才補 100%
+    def start_scifi_simulated(
+        self,
+        text: str = "載入中...",
+        start: int = 25,
+        stop_at: int = 99,
+        interval_ms: int = 60,
+        step: int = 1,
+    ) -> None:
+        self.start_scifi(text)
+        self._sim_value = max(0, min(100, int(start)))
+        self._sim_target = max(0, min(100, int(stop_at)))
+        self._sim_step = max(1, int(step))
+        self._sim_timer.setInterval(max(15, int(interval_ms)))
+        if self._scifi:
+            self._scifi.set_determinate(self._sim_value)
+        QGuiApplication.processEvents()
+        self._sim_timer.start()
+
+    def _on_sim_tick(self) -> None:
+        if self._scifi is None:
+            self._sim_timer.stop()
+            return
+        if self._sim_value >= self._sim_target:
+            self._sim_timer.stop()
+            return
+        self._sim_value = min(self._sim_target, self._sim_value + self._sim_step)
+        self._scifi.set_determinate(self._sim_value)
+        QGuiApplication.processEvents()
 
 
 # ========== 科幻進度條對話框 ==========
