@@ -13,6 +13,7 @@ from modules.camera_manager import CameraManager
 from modules.explorer_controller import ExplorerController
 from modules.photo import PhotoCapture
 from modules.recorder import VideoRecorder
+from modules.shortcuts import get_app_shortcut_manager
 from modules.status_footer import StatusFooter
 from modules.ui_main import build_ui, wire_ui
 from modules.ui_state import update_ui_state
@@ -41,6 +42,8 @@ class MainWindow(QMainWindow):
 
         # Actions: all slots/logic are centralized here
         self.ui_actions = Actions(self, self.cam, self.explorer_ctrl)
+        mgr = get_app_shortcut_manager()
+        mgr.register_main(self, self.ui_actions, self.explorer_ctrl)
         wire_ui(self, self.ui_actions)
 
         # ✅ 加入全域樣式、快捷鍵、說明選單、首次導覽
@@ -84,9 +87,8 @@ class MainWindow(QMainWindow):
         act_keys = QAction("鍵盤快捷鍵", self)
 
         def _show_keys():
-            QMessageBox.information(
-                self, "鍵盤快捷鍵", "Space: 拍照\nR: 開始/繼續錄影\nShift+R: 停止錄影"
-            )
+            mgr = get_app_shortcut_manager()
+            mgr.show_shortcuts_dialog(self)
 
         act_keys.triggered.connect(_show_keys)
         m.addAction(act_tour)

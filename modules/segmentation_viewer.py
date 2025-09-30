@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.explorer import MediaExplorer
+from modules.shortcuts import get_app_shortcut_manager
 from modules.status_footer import StatusFooter
 
 # ---------- helpers ----------
@@ -257,28 +258,14 @@ class SegmentationViewer(QMainWindow):
         self.act_toggle_dock.setText("檔案視窗")
         self.menuView.addAction(self.act_toggle_dock)
 
+        mgr = get_app_shortcut_manager()
+        mgr.register_viewer(self)
+
         # connect
         self.btn_reset_view.clicked.connect(self.view.reset_view)
         self.btn_apply_params.clicked.connect(self._apply_params)
         self.btn_prev.clicked.connect(self._prev_image)
         self.btn_next.clicked.connect(self._next_image)
-
-        # shortcuts
-        act_prev = QAction(self)
-
-        act_prev.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        act_prev.triggered.connect(self._prev_image)
-        self.addAction(act_prev)
-        act_next = QAction(self)
-
-        act_next.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        act_next.triggered.connect(self._next_image)
-        self.addAction(act_next)
-        act_save = QAction(self)
-
-        act_save.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        act_save.triggered.connect(self._save_selected)
-        self.addAction(act_save)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.status = StatusFooter.install(self)
