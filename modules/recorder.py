@@ -1,6 +1,7 @@
 # modules/recorder.py
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +9,8 @@ from PySide6.QtCore import QObject
 from PySide6.QtMultimedia import QMediaRecorder
 
 from utils.utils import build_record_path, ensure_dir, to_qurl_or_str
+
+logger = logging.getLogger(__name__)
 
 
 class VideoRecorder(QObject):
@@ -27,16 +30,18 @@ class VideoRecorder(QObject):
                 state = self._rec.state()
             except Exception:
                 pass
-
-        if (
-            state not in (QMediaRecorder.RecordingState, QMediaRecorder.PausedState)
-            or not self._has_location
-        ):
-            out_path = build_record_path(save_dir)
-            self._rec.setOutputLocation(to_qurl_or_str(out_path))  # QUrl 或 str
-            self._has_location = True
-
-        self._rec.record()
+        try:
+            if (
+                state not in (QMediaRecorder.RecordingState, QMediaRecorder.PausedState)
+                or not self._has_location
+            ):
+                out_path = build_record_path(save_dir)
+                self._rec.setOutputLocation(to_qurl_or_str(out_path))  # QUrl 或 str
+                self._has_location = True
+            self._rec.record()
+        except Exception:
+            logger.exception("開始或繼續錄影失敗，目錄: %s", save_dir)
+            raise
 
     def pause(self):
         self._rec.pause()

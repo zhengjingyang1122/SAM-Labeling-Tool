@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import List, Optional
 
@@ -17,6 +18,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class MediaExplorer(QDockWidget):
@@ -145,6 +148,7 @@ class MediaExplorer(QDockWidget):
                 p.unlink()
                 self.file_deleted.emit(str(p))
             except Exception as e:
+                logger.error("刪除檔案失敗: %s, error=%s", p, e)
                 errors.append(f"{p.name}: {e}")
 
         if errors:
@@ -173,6 +177,7 @@ class MediaExplorer(QDockWidget):
             p.rename(target)
             self.file_renamed.emit(str(p), str(target))
         except Exception as e:
+            logger.exception("重新命名失敗: %s -> %s", p, target)
             QMessageBox.critical(self, "重新命名失敗", str(e))
             return
         self.refresh()

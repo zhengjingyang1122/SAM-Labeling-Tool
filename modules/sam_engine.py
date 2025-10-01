@@ -1,10 +1,13 @@
 # modules/sam_engine.py
+import logging
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
 from segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
+
+logger = logging.getLogger(__name__)
 
 
 class SamEngine:
@@ -36,6 +39,7 @@ class SamEngine:
         ok, frame = cap.read()
         cap.release()
         if not ok or frame is None:
+            logger.error("讀取影片第一幀失敗: %s", video_path)
             raise ValueError("Cannot read first frame")
         tmp = Path("__tmp_vframe__.png")
         cv2.imwrite(str(tmp), frame)
@@ -55,7 +59,7 @@ class SamEngine:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:
-            pass
+            logger.warning("釋放 GPU 記憶體時發生例外（忽略）", exc_info=True)
 
     def is_loaded(self) -> bool:
         return self._sam is not None
@@ -120,6 +124,6 @@ class SamEngine:
                 image_shape=np.array(rgb.shape[:2], dtype=np.int32),
             )
         except Exception:
-            pass
+            logger.warning("寫入 SAM embedding 失敗（略過不影響使用）: %s", img_path, exc_info=True)
 
         return bgr, masks, scores

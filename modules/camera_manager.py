@@ -1,6 +1,7 @@
 # modules/camera_manager.py
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -20,6 +21,8 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from modules.burst import BurstShooter
 from modules.photo import PhotoCapture
 from modules.recorder import VideoRecorder
+
+logger = logging.getLogger(__name__)
 
 
 class CameraManager(QObject):
@@ -65,6 +68,7 @@ class CameraManager(QObject):
         on_rec_error: Optional[Callable[[int, str], None]] = None,
     ):
         if self._camera is not None:
+            logger.info("Camera already active, skip start()")
             return
 
         dev = self._selected or QMediaDevices.defaultVideoInput()
@@ -98,7 +102,7 @@ class CameraManager(QObject):
             self._recorder.setMediaFormat(fmt)
             self._recorder.setQuality(QMediaRecorder.Quality.NormalQuality)
         except Exception:
-            pass
+            logger.warning("Recorder media format not fully set", exc_info=True)
 
         # 註冊錄影訊號
         if on_rec_state_changed:
@@ -111,7 +115,12 @@ class CameraManager(QObject):
         self.burst = BurstShooter(self._image, parent=self)
         self.rec = VideoRecorder(self._recorder, parent=self)
 
-        self._camera.start()
+        try:
+            self._camera.start()
+            logger.info("Camera started")
+        except Exception:
+            logger.exception("Camera start failed")
+            raise
 
     def stop(self):
         # 先停止 recorder 與 camera
@@ -119,12 +128,12 @@ class CameraManager(QObject):
             if self.rec:
                 self.rec.stop()
         except Exception:
-            pass
+            logger.warning("Recorder stop raised exception", exc_info=True)
         try:
             if self._camera:
                 self._camera.stop()
         except Exception:
-            pass
+            logger.warning("Camera stop raised exception", exc_info=True)
 
         # 清理
         self.photo = None

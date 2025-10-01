@@ -1,6 +1,7 @@
 # modules/segmentation_viewer.py
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -36,9 +37,10 @@ from modules.explorer import MediaExplorer
 from modules.shortcuts import get_app_shortcut_manager
 from modules.status_footer import StatusFooter
 
+logger = logging.getLogger(__name__)
+
+
 # ---------- helpers ----------
-
-
 def np_bgr_to_qpixmap(bgr: np.ndarray) -> QPixmap:
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     h, w, _ = rgb.shape
@@ -335,17 +337,22 @@ class SegmentationViewer(QMainWindow):
             # ★ 改用科幻彈窗，而非底部忙碌或 QProgressDialog
             self.status.start_scifi(f"分割中：{Path(path).name}")
             try:
-                bgr, masks, scores = self.compute_masks_fn(
-                    path,
-                    int(self.params["points_per_side"]),
-                    float(self.params["pred_iou_thresh"]),
-                )
+                try:
+                    bgr, masks, scores = self.compute_masks_fn(
+                        path,
+                        int(self.params["points_per_side"]),
+                        float(self.params["pred_iou_thresh"]),
+                    )
+                except Exception:
+                    logger.exception("影像分割失敗: %s", path)
+                    QMessageBox.critical(self, "分割失敗", f"無法分割：{Path(path).name}")
+                    return
                 H, W = bgr.shape[:2]
                 self.status.set_image_resolution(W, H)
                 self.status.set_cursor_xy(None, None)  # 先清空游標座標
-
             finally:
                 self.status.stop_scifi()
+
             masks = [(m > 0).astype(np.uint8) for m in masks]
             self.cache[path] = (bgr, masks, scores)
 
@@ -502,6 +509,7 @@ class SegmentationViewer(QMainWindow):
             QMessageBox.information(self, "完成", f"已儲存：\n{out_path}")
             self.status.message("完成")
         else:
+            logger.error("PNG encode 失敗: %s", out_path)
             QMessageBox.warning(self, "未儲存", "寫入失敗")
 
     def _save_indices(self, indices: List[int]) -> None:
@@ -529,6 +537,8 @@ class SegmentationViewer(QMainWindow):
             if ok:
                 out_path.write_bytes(buf.tobytes())
                 saved += 1
+            else:
+                logger.error("PNG encode 失敗: %s", out_path)
         if saved:
             QMessageBox.information(self, "完成", f"已儲存 {saved} 個物件")
             self.status.message("完成")
@@ -538,46 +548,50 @@ class SegmentationViewer(QMainWindow):
     # ---- event filter on view viewport ----
     def eventFilter(self, obj, event):
         if obj is self.view.viewport():
+            try:
 
-            def _pt(ev):
-                return ev.position().toPoint() if hasattr(ev, "position") else ev.pos()
+                def _pt(ev):
+                    return ev.position().toPoint() if hasattr(ev, "position") else ev.pos()
 
-            if event.type() == QEvent.MouseMove:
-                pos = _pt(event)
-                img_xy = self._map_widget_to_image(pos)
-                if img_xy is None:
-                    if self._hover_idx is not None:
-                        self._hover_idx = None
+                if event.type() == QEvent.MouseMove:
+                    pos = _pt(event)
+                    img_xy = self._map_widget_to_image(pos)
+                    if img_xy is None:
+                        if self._hover_idx is not None:
+                            self._hover_idx = None
+                            self._update_canvas()
+                        self.status.set_cursor_xy(None, None)  # 清空
+                    else:
+                        x, y = img_xy
+                        path = self.image_paths[self.idx]
+                        _, masks, _ = self.cache[path]
+                        self._hover_idx = self._hit_test_xy(masks, x, y)
                         self._update_canvas()
-                    self.status.set_cursor_xy(None, None)  # 清空
-                else:
+                        self.status.set_cursor_xy(x, y)  # 即時更新游標座標
+                    return False
+                if event.type() == QEvent.MouseButtonPress:
+                    pos = _pt(event)
+                    img_xy = self._map_widget_to_image(pos)
+                    if img_xy is None:
+                        return False
                     x, y = img_xy
                     path = self.image_paths[self.idx]
                     _, masks, _ = self.cache[path]
-                    self._hover_idx = self._hit_test_xy(masks, x, y)
-                    self._update_canvas()
-                    self.status.set_cursor_xy(x, y)  # 即時更新游標座標
-                return False
-            if event.type() == QEvent.MouseButtonPress:
-                pos = _pt(event)
-                img_xy = self._map_widget_to_image(pos)
-                if img_xy is None:
-                    return False
-                x, y = img_xy
-                path = self.image_paths[self.idx]
-                _, masks, _ = self.cache[path]
-                tgt = self._hit_test_xy(masks, x, y)
-                if tgt is None:
-                    return False
-                if event.button() == Qt.MouseButton.LeftButton:
-                    self.selected_indices.add(tgt)
-                    self._update_selected_count()
-                    self._update_canvas()
-                elif event.button() == Qt.MouseButton.RightButton:
-                    if tgt in self.selected_indices:
-                        self.selected_indices.remove(tgt)
+                    tgt = self._hit_test_xy(masks, x, y)
+                    if tgt is None:
+                        return False
+                    if event.button() == Qt.MouseButton.LeftButton:
+                        self.selected_indices.add(tgt)
                         self._update_selected_count()
                         self._update_canvas()
+                    elif event.button() == Qt.MouseButton.RightButton:
+                        if tgt in self.selected_indices:
+                            self.selected_indices.remove(tgt)
+                            self._update_selected_count()
+                            self._update_canvas()
+                    return False
+            except Exception:
+                logger.warning("滑鼠事件處理發生例外", exc_info=True)
                 return False
         return super().eventFilter(obj, event)
 

@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import logging
 import sys
+from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QSettings
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QSettings, QUrl
+from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from modules.actions import Actions
 from modules.burst import BurstShooter
 from modules.camera_manager import CameraManager
 from modules.explorer_controller import ExplorerController
+from modules.logging_setup import (
+    get_logger,
+    install_qt_message_proxy,
+    install_ui_targets,
+    setup_logging,
+)
 from modules.photo import PhotoCapture
 from modules.prefs import get_prefs
 from modules.recorder import VideoRecorder
@@ -18,6 +26,8 @@ from modules.shortcuts import get_app_shortcut_manager
 from modules.status_footer import StatusFooter
 from modules.ui_main import build_ui, wire_ui
 from modules.ui_state import update_ui_state
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -37,6 +47,38 @@ class MainWindow(QMainWindow):
 
         self.status = StatusFooter.install(self)
         self.status.message("狀態：待機")
+
+        # 讀取偏好並初始化 logging
+        prefs = get_prefs()
+        log_p = prefs.get("logging.dir", "logs")
+        lvl = prefs.get("logging.level", "INFO")
+        json_enabled = bool(prefs.get("logging.json_enabled", True))
+        max_bytes = int(prefs.get("logging.max_bytes", 2_000_000))
+        backup_count = int(prefs.get("logging.backup_count", 5))
+        lvl_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL,
+        }
+        setup_logging(
+            level=lvl_map.get(str(lvl).upper(), logging.INFO),
+            log_dir=log_p,
+            json_enabled=json_enabled,
+            max_bytes=max_bytes,
+            backup_count=backup_count,
+        )
+
+        # 安裝 Qt 訊息代理, 使 Qt 警告也進入 logging
+        install_qt_message_proxy()
+
+        # 綁定 UI handler 目標與規則
+        popup_lvl = prefs.get("logging.ui.popup_level", "ERROR")
+        rate_ms = int(prefs.get("logging.ui.rate_limit_ms", 1500))
+        install_ui_targets(
+            self, self.status, rate_ms, lvl_map.get(str(popup_lvl).upper(), logging.ERROR)
+        )
 
         # Left dock: file explorer controller
         self.explorer_ctrl = ExplorerController(self, self.btn_toggle_explorer, self.dir_edit)
@@ -111,8 +153,22 @@ class MainWindow(QMainWindow):
             mgr.show_shortcuts_dialog(self)
 
         act_keys.triggered.connect(_show_keys)
+
+        # 新增: 開啟日誌資料夾
+        act_logs = QAction("開啟日誌資料夾", self)
+
+        def _open_logs():
+            from modules.prefs import get_prefs
+
+            p = Path(get_prefs().get("logging.dir", "logs")).expanduser()
+            p.mkdir(parents=True, exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(p)))
+
+        act_logs.triggered.connect(_open_logs)
+
         m.addAction(act_tour)
         m.addAction(act_keys)
+        m.addAction(act_logs)
 
     def _maybe_run_onboarding(self):
         s = QSettings("VersaLab", "WebcamSnapper")
@@ -128,11 +184,20 @@ class MainWindow(QMainWindow):
             wiz = OnboardingWizard(self)
             wiz.exec()
         except Exception as e:
+            logger.warning("導覽載入失敗: %s", e, exc_info=True)
             QMessageBox.information(self, "導覽", f"導覽載入失敗: {e}")
 
 
 def main():
     app = QApplication(sys.argv)
+
+    # 捕捉未處理例外
+    def _excepthook(exc_type, exc, tb):
+        logger = get_logger("Uncaught")
+        logger.error("Uncaught exception", exc_info=(exc_type, exc, tb))
+
+    sys.excepthook = _excepthook
+
     w = MainWindow()
     w.showMaximized()
     sys.exit(app.exec())

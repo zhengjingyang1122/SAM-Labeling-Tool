@@ -1,6 +1,7 @@
 # modules/explorer_controller.py
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +9,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLineEdit, QMainWindow, QPushButton
 
 from modules.explorer import MediaExplorer
+
+logger = logging.getLogger(__name__)
 
 
 class ExplorerController:
@@ -29,12 +32,15 @@ class ExplorerController:
         self.explorer.visibilityChanged.connect(self._on_visibility_changed)
 
     def _on_toggle(self, checked: bool):
-        self.explorer.setVisible(checked)
-        if checked:
-            try:
-                self.explorer.setFloating(False)
-            except Exception:
-                pass
+        try:
+            self.explorer.setVisible(checked)
+            if checked:
+                try:
+                    self.explorer.setFloating(False)
+                except Exception:
+                    logger.warning("將 Dock 取消浮動時發生例外", exc_info=True)
+        except Exception:
+            logger.warning("顯示/隱藏檔案瀏覽 Dock 例外", exc_info=True)
 
     def _on_visibility_changed(self, visible: bool):
         self._btn.blockSignals(True)
@@ -43,7 +49,10 @@ class ExplorerController:
 
     def set_root_dir_from_edit(self):
         path = Path(self._dir_edit.text()).expanduser()
-        self.explorer.set_root_dir(path)
+        try:
+            self.explorer.set_root_dir(path)
+        except Exception:
+            logger.error("設定檔案瀏覽根目錄失敗: %s", path, exc_info=True)
 
     def refresh(self):
         self.explorer.refresh()

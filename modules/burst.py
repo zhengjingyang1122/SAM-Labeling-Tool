@@ -1,6 +1,7 @@
 # modules/burst.py
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -10,6 +11,8 @@ from PySide6.QtMultimedia import QImageCapture
 
 from modules.photo import PhotoCapture
 from utils.utils import ensure_dir, ts
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -39,6 +42,7 @@ class BurstShooter(QObject):
         callbacks: Optional[BurstCallbacks] = None,
     ):
         if self._timer.isActive():
+            logger.warning("嘗試在連拍進行中再次 start，已忽略")
             return
         ensure_dir(save_dir)
         self._total = int(count)
@@ -65,6 +69,13 @@ class BurstShooter(QObject):
     def _tick(self, initial: bool = False):
         if self._remaining <= 0:
             self.stop()
+            logger.info(
+                "連拍完成: series=%s, 最後張序號=%d, 共 %d 張",
+                self._series_id,
+                self._total,
+                self._total,
+            )
+
             if self._cbs.on_done:
                 self._cbs.on_done()
             return

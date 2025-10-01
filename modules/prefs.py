@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -22,7 +23,17 @@ _DEFAULTS: Dict[str, Any] = {
             "scale": 0.003,  # 核大小比例, 隨影像最短邊 * scale
         },
     },
+    "logging": {
+        "level": "INFO",  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+        "dir": "logs",
+        "json_enabled": True,
+        "max_bytes": 2_000_000,
+        "backup_count": 5,
+        "ui": {"popup_level": "ERROR", "rate_limit_ms": 1500},  # WARNING 或 ERROR 或 CRITICAL
+    },
 }
+
+logger = logging.getLogger(__name__)
 
 
 class Prefs:
@@ -37,12 +48,17 @@ class Prefs:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 self._merge(self._data, data)
         except Exception:
-            # 壞檔忽略, 保留預設
+            logger.warning("偏好檔案讀取失敗，使用預設值", exc_info=True)
             pass
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                json.dumps(self._data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            logger.exception("偏好檔案儲存失敗: %s", self.path)
 
     def get(self, key: str, default: Any = None) -> Any:
         cur = self._data

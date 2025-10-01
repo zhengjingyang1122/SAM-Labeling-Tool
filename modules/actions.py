@@ -1,6 +1,7 @@
 # modules/actions.py
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable, List, Optional
 from urllib.request import urlretrieve
@@ -22,6 +23,8 @@ except Exception:
 DEFAULT_SAM_MODEL_TYPE = "vit_h"
 DEFAULT_SAM_CKPT = Path("./models/sam_vit_h_4b8939.pth")
 DEFAULT_SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------- 小工具 ----------------
@@ -143,8 +146,6 @@ class Actions:
 
             update_ui_state(self.w)
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-
             QMessageBox.critical(self.w, "相機啟動失敗", str(e))
 
     def stop_camera(self):
@@ -153,8 +154,6 @@ class Actions:
             self.w.status.message("狀態：相機停止")
             update_ui_state(self.w)
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-
             QMessageBox.critical(self.w, "相機停止失敗", str(e))
 
     def capture_image(self):
@@ -163,7 +162,6 @@ class Actions:
         out_dir = Path(self.w.dir_edit.text())
         _ensure_dir(out_dir)
         if getattr(self.cam, "photo", None) is None:
-            from PySide6.QtWidgets import QMessageBox
 
             QMessageBox.warning(self.w, "無法拍照", "相機尚未啟動或不支援拍照")
             return
@@ -176,8 +174,7 @@ class Actions:
                 self.explorer.refresh()
             self.w.status.message(f"狀態：已拍照 → {Path(path).name}")
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-
+            logger.exception("拍照失敗")
             QMessageBox.critical(self.w, "拍照失敗", str(e))
 
     # -------------- 連拍 --------------
@@ -206,8 +203,7 @@ class Actions:
         out_dir = Path(self.w.dir_edit.text())
         _ensure_dir(out_dir)
         if getattr(self.cam, "rec", None) is None:
-            from PySide6.QtWidgets import QMessageBox
-
+            logger.warning("錄影控制器不存在或相機未啟動")
             QMessageBox.warning(self.w, "無法錄影", "相機尚未啟動或不支援錄影")
             return
         self.cam.rec.start_or_resume(out_dir)
@@ -221,8 +217,6 @@ class Actions:
             self.w.rec_ctrl.pause()
             self.w.status.message("狀態：錄影暫停")
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-
             QMessageBox.critical(self.w, "暫停錄影錯誤", str(e))
 
     def stop_recording(self):
@@ -234,8 +228,7 @@ class Actions:
             if hasattr(self.explorer, "refresh"):
                 self.explorer.refresh()
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-
+            logger.exception("停止錄影錯誤")
             QMessageBox.critical(self.w, "停止錄影錯誤", str(e))
 
     # -------------- SAM 載入 --------------
@@ -264,9 +257,13 @@ class Actions:
                 ckpt = default
             else:
                 # 2) 詢問是否下載，使用者同意就下載
-                maybe = self._download_sam_with_prompt()
-                if maybe is not None:
-                    ckpt = maybe
+                try:
+                    maybe = self._download_sam_with_prompt()
+                    if maybe is not None:
+                        ckpt = maybe
+                except Exception as e:
+                    logger.exception("下載 SAM 權重失敗")
+                    QMessageBox.critical(self.w, "下載 SAM 權重失敗", str(e))
 
         # 3) 若仍沒有 ckpt，回退到舊的檔案選取流程
         if ckpt is None or not Path(ckpt).exists():
@@ -287,13 +284,12 @@ class Actions:
             return True
         except Exception as e:
             self.w.status.stop_scifi("狀態：模型載入失敗")
+            logger.exception("SAM 模型載入失敗")
             QMessageBox.critical(self.w, "載入失敗", str(e))
             self.sam = None
             return False
 
     def toggle_preload_sam(self, checked: bool):
-        from PySide6.QtWidgets import QMessageBox
-
         if checked:
             ok = self._ensure_sam_loaded_interactive()
             if not ok:
@@ -440,7 +436,7 @@ class Actions:
                         p, points_per_side=pps, pred_iou_thresh=iou
                     )
                 except Exception:
-                    pass
+                    logger.exception("批次建立快取時發生錯誤: %s", p)
         finally:
             self.w.status.stop_scifi()
 
@@ -533,8 +529,6 @@ class Actions:
         viewer.activateWindow()
 
     def _download_sam_with_prompt(self) -> Optional[Path]:
-        from PySide6.QtWidgets import QMessageBox
-
         dst = DEFAULT_SAM_CKPT
         if dst.exists():
             return dst
@@ -569,15 +563,14 @@ class Actions:
             return dst
         except Exception as e:
             self.w.status.stop_scifi("狀態：SAM 權重下載失敗")
-            from PySide6.QtWidgets import QMessageBox
-
+            logger.exception("下載 SAM 權重失敗")
             QMessageBox.critical(self.w, "下載失敗", str(e))
             try:
                 # 下載失敗時清掉未完成檔
                 if dst.exists():
                     dst.unlink()
             except Exception:
-                pass
+                logger.warning("清理未完成 SAM 權重暫存檔失敗", exc_info=True)
             return None
 
     # 新增：由 Dock 多選觸發, 選幾張就開幾個視窗
