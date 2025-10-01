@@ -33,9 +33,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from modules.explorer import MediaExplorer
-from modules.shortcuts import get_app_shortcut_manager
-from modules.status_footer import StatusFooter
+from modules.presentation.qt.explorer.explorer import MediaExplorer
+from modules.presentation.qt.shortcuts import get_app_shortcut_manager
+from modules.presentation.qt.status_footer import StatusFooter
 
 logger = logging.getLogger(__name__)
 

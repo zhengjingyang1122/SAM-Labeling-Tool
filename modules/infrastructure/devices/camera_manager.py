@@ -18,9 +18,9 @@ from PySide6.QtMultimedia import (
 )
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
-from modules.burst import BurstShooter
-from modules.photo import PhotoCapture
-from modules.recorder import VideoRecorder
+from modules.infrastructure.io.burst import BurstShooter
+from modules.infrastructure.io.photo import PhotoCapture
+from modules.infrastructure.io.recorder import VideoRecorder
 
 logger = logging.getLogger(__name__)
 

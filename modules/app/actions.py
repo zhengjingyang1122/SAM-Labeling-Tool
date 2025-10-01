@@ -10,13 +10,13 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox
 
-from modules.prefs import get_prefs
-from modules.segmentation_viewer import SegmentationViewer
-from modules.ui_state import update_ui_state
+from modules.infrastructure.config.prefs import get_prefs
+from modules.presentation.qt.segmentation.segmentation_viewer import SegmentationViewer
+from modules.presentation.qt.ui_state import update_ui_state
 
 # 動態載入 sam_engine（不綁定固定 API 名稱）
 try:
-    import modules.sam_engine as sam_engine_mod
+    import modules.infrastructure.vision.sam_engine as sam_engine_mod
 except Exception:
     sam_engine_mod = None
 

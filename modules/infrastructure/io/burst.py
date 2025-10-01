@@ -9,7 +9,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtMultimedia import QImageCapture
 
-from modules.photo import PhotoCapture
+from modules.infrastructure.io.photo import PhotoCapture
 from utils.utils import ensure_dir, ts
 
 logger = logging.getLogger(__name__)
