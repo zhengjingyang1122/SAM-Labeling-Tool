@@ -9,23 +9,24 @@ from PySide6.QtCore import QSettings, QUrl
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
-from modules.actions import Actions
-from modules.burst import BurstShooter
-from modules.camera_manager import CameraManager
-from modules.explorer_controller import ExplorerController
-from modules.logging_setup import (
+from modules.app.actions import Actions
+from modules.infrastructure.config.prefs import get_prefs
+from modules.infrastructure.devices.camera_manager import CameraManager
+from modules.infrastructure.io.burst import BurstShooter
+from modules.infrastructure.io.photo import PhotoCapture
+from modules.infrastructure.io.recorder import VideoRecorder
+from modules.infrastructure.logging.logging_setup import (
     get_logger,
     install_qt_message_proxy,
     install_ui_targets,
     setup_logging,
 )
-from modules.photo import PhotoCapture
-from modules.prefs import get_prefs
-from modules.recorder import VideoRecorder
-from modules.shortcuts import get_app_shortcut_manager
-from modules.status_footer import StatusFooter
-from modules.ui_main import build_ui, wire_ui
-from modules.ui_state import update_ui_state
+from modules.presentation.qt.explorer.explorer_controller import ExplorerController
+from modules.presentation.qt.onboarding import OnboardingWizard
+from modules.presentation.qt.shortcuts import get_app_shortcut_manager
+from modules.presentation.qt.status_footer import StatusFooter
+from modules.presentation.qt.ui_main import build_ui, wire_ui
+from modules.presentation.qt.ui_state import update_ui_state
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,6 @@ class MainWindow(QMainWindow):
         act_logs = QAction("開啟日誌資料夾", self)
 
         def _open_logs():
-            from modules.prefs import get_prefs
 
             p = Path(get_prefs().get("logging.dir", "logs")).expanduser()
             p.mkdir(parents=True, exist_ok=True)
@@ -179,8 +179,6 @@ class MainWindow(QMainWindow):
 
     def _show_onboarding(self, first_run: bool = False):
         try:
-            from modules.onboarding import OnboardingWizard
-
             wiz = OnboardingWizard(self)
             wiz.exec()
         except Exception as e:

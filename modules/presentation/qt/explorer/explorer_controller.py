@@ -8,7 +8,7 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLineEdit, QMainWindow, QPushButton
 
-from modules.explorer import MediaExplorer
+from modules.presentation.qt.explorer.explorer import MediaExplorer
 
 logger = logging.getLogger(__name__)
 
