@@ -5,12 +5,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QSettings, QUrl
+from PySide6.QtCore import QUrl
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from modules.app.actions import Actions
-from modules.infrastructure.config.prefs import get_prefs
 from modules.infrastructure.devices.camera_manager import CameraManager
 from modules.infrastructure.io.burst import BurstShooter
 from modules.infrastructure.io.photo import PhotoCapture
@@ -49,37 +48,25 @@ class MainWindow(QMainWindow):
         self.status = StatusFooter.install(self)
         self.status.message("狀態：待機")
 
-        # 讀取偏好並初始化 logging
-        prefs = get_prefs()
-        log_p = prefs.get("logging.dir", "logs")
-        lvl = prefs.get("logging.level", "INFO")
-        json_enabled = bool(prefs.get("logging.json_enabled", True))
-        max_bytes = int(prefs.get("logging.max_bytes", 2_000_000))
-        backup_count = int(prefs.get("logging.backup_count", 5))
-        lvl_map = {
-            "DEBUG": logging.DEBUG,
-            "INFO": logging.INFO,
-            "WARNING": logging.WARNING,
-            "ERROR": logging.ERROR,
-            "CRITICAL": logging.CRITICAL,
-        }
+        log_p = "logs"
+        lvl = "INFO"
+        json_enabled = True
+        max_bytes = 2000000
+        backup_count = 5
         setup_logging(
-            level=lvl_map.get(str(lvl).upper(), logging.INFO),
             log_dir=log_p,
+            level=lvl,
             json_enabled=json_enabled,
             max_bytes=max_bytes,
             backup_count=backup_count,
         )
 
+        popup_lvl = logging.ERROR
+        rate_ms = 1500
+        install_ui_targets(self, self.status, rate_limit_ms=rate_ms, popup_level=popup_lvl)
+
         # 安裝 Qt 訊息代理, 使 Qt 警告也進入 logging
         install_qt_message_proxy()
-
-        # 綁定 UI handler 目標與規則
-        popup_lvl = prefs.get("logging.ui.popup_level", "ERROR")
-        rate_ms = int(prefs.get("logging.ui.rate_limit_ms", 1500))
-        install_ui_targets(
-            self, self.status, rate_ms, lvl_map.get(str(popup_lvl).upper(), logging.ERROR)
-        )
 
         # Left dock: file explorer controller
         self.explorer_ctrl = ExplorerController(self, self.btn_toggle_explorer, self.dir_edit)
@@ -99,25 +86,6 @@ class MainWindow(QMainWindow):
         update_ui_state(self)
         self.explorer_ctrl.refresh()
         self.ui_actions.populate_camera_devices()
-
-        prefs = get_prefs()
-        out_dir = prefs.get("output_dir", "")
-        if out_dir:
-            try:
-                self.dir_edit.setText(out_dir)
-                self.explorer_ctrl.set_root(out_dir)
-            except Exception:
-                pass
-
-        # 相機偏好可在裝置掃描完成後套用
-        # 假設 actions 或 camera_manager 有 refresh_devices()
-        try:
-            want = prefs.get("camera.preferred_device", "")
-            if want:
-                self.ui_actions.select_camera_by_name(want)  # 需在 Actions 補這個 helper, 見下方
-        except Exception:
-            pass
-        self.dir_edit.editingFinished.connect(lambda: prefs.set("output_dir", self.dir_edit.text()))
 
     # 新增到 MainWindow 類別內
     def _apply_global_style(self):
@@ -159,8 +127,7 @@ class MainWindow(QMainWindow):
         act_logs = QAction("開啟日誌資料夾", self)
 
         def _open_logs():
-
-            p = Path(get_prefs().get("logging.dir", "logs")).expanduser()
+            p = Path("logs").expanduser()
             p.mkdir(parents=True, exist_ok=True)
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(p)))
 
@@ -171,11 +138,7 @@ class MainWindow(QMainWindow):
         m.addAction(act_logs)
 
     def _maybe_run_onboarding(self):
-        s = QSettings("VersaLab", "WebcamSnapper")
-        first = s.value("onboarded", False, type=bool) is False
-        if first:
-            self._show_onboarding(first_run=True)
-            s.setValue("onboarded", True)
+        pass
 
     def _show_onboarding(self, first_run: bool = False):
         try:

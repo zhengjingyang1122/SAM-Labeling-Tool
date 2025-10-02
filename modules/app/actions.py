@@ -10,7 +10,6 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox
 
-from modules.infrastructure.config.prefs import get_prefs
 from modules.presentation.qt.segmentation.segmentation_viewer import SegmentationViewer
 from modules.presentation.qt.ui_state import update_ui_state
 
@@ -58,22 +57,21 @@ class Actions:
                 dock.files_segment_requested.connect(self.open_segmentation_for_file_list)
         except Exception:
             pass
-        self._prefs = get_prefs()
         self.default_params = {
-            "points_per_side": self._prefs.get("sam.points_per_side", 32),
-            "pred_iou_thresh": self._prefs.get("sam.pred_iou_thresh", 0.88),
+            "points_per_side": 32,
+            "pred_iou_thresh": 0.88,
+            "union_morph_enabled": True,
+            "union_morph_scale": 0.003,
+            "fit_on_open": True,
         }
 
     def _on_output_dir_changed(self, path: str) -> None:
-        try:
-            self._prefs.set("output_dir", path)
-        except Exception:
-            pass
+        pass
 
     # 供 main.py 用名稱選定裝置
     def select_camera_by_name(self, name: str) -> None:
         try:
-            cb = self.w.ui.camera_combo  # 依你的 UI 命名替換
+            cb = self.w.cam_combo
             for i in range(cb.count()):
                 if cb.itemText(i) == name:
                     cb.setCurrentIndex(i)
@@ -138,11 +136,6 @@ class Actions:
                 pass
             self.cam.start(self.w.video_widget)
             self.w.status.message("狀態：相機啟動")
-            try:
-                name = self.w.cam_combo.currentText()
-                self._prefs.set("camera.preferred_device", name)
-            except Exception:
-                pass
 
             update_ui_state(self.w)
         except Exception as e:
@@ -157,22 +150,17 @@ class Actions:
             QMessageBox.critical(self.w, "相機停止失敗", str(e))
 
     def capture_image(self):
-        from pathlib import Path
-
         out_dir = Path(self.w.dir_edit.text())
         _ensure_dir(out_dir)
         if getattr(self.cam, "photo", None) is None:
-
             QMessageBox.warning(self.w, "無法拍照", "相機尚未啟動或不支援拍照")
             return
-        from utils.utils import build_snapshot_path
-
-        path = build_snapshot_path(out_dir)
         try:
-            self.cam.photo._capture_with_retry(path)
+            # 交由公開方法自動命名與重試
+            self.cam.photo.capture_single(out_dir)
             if hasattr(self.explorer, "refresh"):
                 self.explorer.refresh()
-            self.w.status.message(f"狀態：已拍照 → {Path(path).name}")
+            self.w.status.message("狀態：已拍照")
         except Exception as e:
             logger.exception("拍照失敗")
             QMessageBox.critical(self.w, "拍照失敗", str(e))
@@ -188,12 +176,16 @@ class Actions:
         count = int(self.w.burst_count.value())
         interval = int(self.w.burst_interval.value())
         self.cam.burst.start(count, interval, out_dir)
+        self.w.burst_ctrl = self.cam.burst
+        update_ui_state(self.w)
         if hasattr(self.explorer, "refresh"):
             self.explorer.refresh()
 
     def stop_burst(self):
         if getattr(self.cam, "burst", None):
             self.cam.burst.stop()
+        self.w.burst_ctrl = None
+        update_ui_state(self.w)
 
     # -------------- 錄影 --------------
 
@@ -430,8 +422,8 @@ class Actions:
             self.w.status.start_scifi("批次分割中：建立快取與 embedding")
             for p in imgs:
                 try:
-                    pps = self._prefs.get("sam.points_per_side", 32)
-                    iou = self._prefs.get("sam.pred_iou_thresh", 0.88)
+                    pps = self.default_params["points_per_side"]
+                    iou = self.default_params["pred_iou_thresh"]
                     self.sam.auto_masks_from_image_cached(
                         p, points_per_side=pps, pred_iou_thresh=iou
                     )
@@ -496,11 +488,11 @@ class Actions:
         if not hasattr(self, "_seg_windows"):
             self._seg_windows = []
         params = {
-            "points_per_side": self._prefs.get("sam.points_per_side", 32),
-            "pred_iou_thresh": self._prefs.get("sam.pred_iou_thresh", 0.88),
-            "union_morph_enabled": self._prefs.get("viewer.union_morph.enabled", True),
-            "union_morph_scale": self._prefs.get("viewer.union_morph.scale", 0.003),
-            "fit_on_open": self._prefs.get("viewer.fit_on_open", True),
+            "points_per_side": self.default_params["points_per_side"],
+            "pred_iou_thresh": self.default_params["pred_iou_thresh"],
+            "union_morph_enabled": self.default_params["union_morph_enabled"],
+            "union_morph_scale": self.default_params["union_morph_scale"],
+            "fit_on_open": self.default_params["fit_on_open"],
         }
 
         viewer = SegmentationViewer(

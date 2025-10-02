@@ -80,7 +80,7 @@ class _UiLogBridge:
         self._last_popup_at = 0.0
         self._last_popup_msg = ""
         self.rate_limit_ms = 1500
-        self.popup_level = logging.ERROR  # 可由 Prefs 覆寫
+        self.popup_level = logging.ERROR
 
     def bind(self, parent, status, rate_limit_ms: int, popup_level: int) -> None:
         self._parent = parent

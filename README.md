@@ -18,7 +18,6 @@
   - [使用流程](#使用流程)
   - [SAM 自動分割詳解](#sam-自動分割詳解)
   - [鍵盤快捷鍵](#鍵盤快捷鍵)
-  - [偏好設定](#偏好設定)
   - [日誌與 UI 提示](#日誌與-ui-提示)
   - [檔案結構](#檔案結構)
   - [開發與擴充](#開發與擴充)
@@ -142,20 +141,6 @@ Viewer 範圍:
 
 ---
 
-## 偏好設定
-
-檔案路徑: prefs.json. 預設值包含輸出路徑, 相機偏好, SAM 參數, 檢視器設定, 與日誌設定.
-
-重點鍵值:
-
-- output_dir: 預設輸出資料夾.
-- camera.preferred_device: 優先相機名稱.
-- sam.points_per_side 與 sam.pred_iou_thresh: 自動分割精度門檻.
-- viewer.fit_on_open 與 viewer.union_morph.enabled, viewer.union_morph.scale: 檢視體驗與聯集後處理.
-- logging.level, logging.dir, logging.json_enabled, logging.ui.popup_level, logging.ui.rate_limit_ms: 日誌與 UI 通知.
-
----
-
 ## 日誌與 UI 提示
 
 - 檔案輸出: logs/app.log 與 logs/app.jsonl 輪替. 支援 JSON 格式與去識別化, 包含 email, phone, 統一編號等防誤曝.
@@ -178,7 +163,7 @@ Viewer 範圍:
 ├─ logging_setup.py               # 日誌設定與 UI 橋接
 ├─ onboarding.py                  # 快速導覽精靈
 ├─ photo.py                       # 單張拍照與重試
-├─ prefs.py                       # 偏好存取工具
+
 ├─ recorder.py                    # 錄影控制 VideoRecorder
 ├─ sam_engine.py                  # SAM 推論與快取
 ├─ segmentation_viewer.py         # 分割檢視器與互動輸出
@@ -187,7 +172,7 @@ Viewer 範圍:
 ├─ ui_main.py                     # 主視窗 UI 元件佈局與 wire-up
 ├─ ui_state.py                    # 控制項可用狀態切換
 ├─ utils.py                       # 路徑, 檔名, 時間戳工具
-├─ prefs.json                     # 偏好檔
+
 ├─ shortcuts.json                 # 快捷鍵覆寫檔
 └─ README.md
 ~~~

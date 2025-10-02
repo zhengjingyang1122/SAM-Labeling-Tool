@@ -370,23 +370,12 @@ class SegmentationViewer(QMainWindow):
         iou = float(self.spn_iou.value())
         self.params["points_per_side"] = pps
         self.params["pred_iou_thresh"] = iou
-
-        morph_on = bool(self.chk_union_morph.isChecked())
-        morph_scale = float(self.dbl_morph_scale.value())
-        self.params["union_morph_enabled"] = morph_on
-        self.params["union_morph_scale"] = morph_scale
         self._load_current_image(recompute=True)
-
-        # 寫回偏好
-        self.prefs.set("sam.points_per_side", pps)
-        self.prefs.set("sam.pred_iou_thresh", iou)
-        self.prefs.set("viewer.union_morph.enabled", morph_on)
-        self.prefs.set("viewer.union_morph.scale", morph_scale)
-        self.status.message_temp("參數已套用且儲存為偏好", 1800)
+        self.status.message_temp("參數已套用", 1800)
 
     # 若你有「視圖置入」按鈕或勾選, 也寫回
     def on_fit_on_open_toggled(self, on: bool):
-        self.prefs.set("viewer.fit_on_open", bool(on))
+        self.params["fit_on_open"] = bool(on)
 
     # ---- navigation ----
     def _update_nav_buttons(self) -> None:
