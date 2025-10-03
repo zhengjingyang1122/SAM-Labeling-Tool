@@ -24,7 +24,10 @@ class SamEngine:
 
     def auto_masks_from_image(self, img_path: Path, points_per_side=32, pred_iou_thresh=0.88):
         self._ensure_loaded()
-        bgr = cv2.imread(str(img_path))
+        img_path = Path(img_path)
+        bgr = self._read_image_bgr(img_path)
+        if bgr is None or bgr.size == 0:
+            raise FileNotFoundError(f"讀取影像失敗，請確認檔案存在且可讀: {img_path}")
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         amg = SamAutomaticMaskGenerator(
             self._sam, points_per_side=points_per_side, pred_iou_thresh=pred_iou_thresh
@@ -127,3 +130,26 @@ class SamEngine:
             logger.warning("寫入 SAM embedding 失敗（略過不影響使用）: %s", img_path, exc_info=True)
 
         return bgr, masks, scores
+
+    def _read_image_bgr(self, img_path: Path):
+        """
+        穩健讀入影像為 BGR。避免 Windows 上含中文或特殊字元路徑造成 imread 失敗。
+        回傳: np.ndarray 或 None
+        """
+        try:
+            # 以 bytes 讀檔，再用 imdecode，最穩定也最能處理 Unicode 路徑
+            data = img_path.read_bytes()
+            arr = np.frombuffer(data, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is not None:
+                return img
+        except Exception as e:
+            logger.warning("以 imdecode 讀取影像失敗: %s | %s", img_path, e)
+
+        # 後備方案：傳統 imread
+        try:
+            img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+            return img
+        except Exception as e:
+            logger.error("以 imread 讀取影像失敗: %s | %s", img_path, e)
+            return None

@@ -89,6 +89,10 @@ class StatusFooter(QStatusBar):
         self._img_wh = None
         self._cur_xy = None
 
+        self._display_mode = None  # "遮罩" 或 "BBox"
+        self._is_union = False  # True=聯集, False=個別
+        self._selected_count = 0  # 已選目標數
+
         self._sim_timer = QTimer(self)
         self._sim_timer.setInterval(60)
         self._sim_timer.timeout.connect(self._on_sim_tick)
@@ -124,6 +128,16 @@ class StatusFooter(QStatusBar):
         self._progress.setValue(v)
         if text:
             self.message(text)
+
+    # [新增] 放在「公開 API」區塊其他方法旁
+    def set_display_info(self, mode: str, is_union: bool, selected_count: int) -> None:
+        self._display_mode = mode
+        self._is_union = bool(is_union)
+        try:
+            self._selected_count = max(0, int(selected_count))
+        except Exception:
+            self._selected_count = 0
+        self._update_meta()
 
     # ---------- 靜態安裝器 ----------
     @staticmethod
@@ -193,12 +207,18 @@ class StatusFooter(QStatusBar):
         self._cur_xy = None if x is None or y is None else (x, y)
         self._update_meta()
 
+    # [修改] 以下方法以新版本覆蓋
     def _update_meta(self) -> None:
         parts = []
         if self._img_wh:
             parts.append(f"{self._img_wh[0]}x{self._img_wh[1]}")
         if self._cur_xy:
             parts.append(f"({self._cur_xy[0]},{self._cur_xy[1]})")
+        # [新增] 顯示模式/聯集/已選
+        if getattr(self, "_display_mode", None):
+            parts.append(f"顯示:{self._display_mode}")
+            parts.append(f"聯集:{'ON' if self._is_union else 'OFF'}")
+            parts.append(f"已選:{self._selected_count}")
         self._meta.setText(" | ".join(parts))
 
     # 模擬載入進度：從 25% 慢慢跑到 99%，等待實際完成後才補 100%

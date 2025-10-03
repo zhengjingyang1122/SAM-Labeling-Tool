@@ -12,6 +12,7 @@ from PySide6.QtGui import QAction, QImage, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
+    QCheckBox,
     QDockWidget,
     QDoubleSpinBox,
     QFileDialog,
@@ -211,6 +212,41 @@ class SegmentationViewer(QMainWindow):
         lay_mode.addWidget(self.rb_mode_indiv)
         lay_mode.addWidget(self.rb_mode_union)
         grp_mode.setLayout(lay_mode)
+        # [新增] 顯示模式切換群組，放在 grp_mode 定義之後
+        grp_display = QGroupBox("顯示模式")
+        self.rb_show_mask = QRadioButton("遮罩高亮")
+        self.rb_show_bbox = QRadioButton("Bounding Box")
+        self.rb_show_mask.setChecked(True)
+
+        self.display_group = QButtonGroup(self)
+        self.display_group.addButton(self.rb_show_mask, 0)  # 0=遮罩
+        self.display_group.addButton(self.rb_show_bbox, 1)  # 1=BBox
+
+        lay_display = QVBoxLayout()
+        lay_display.addWidget(self.rb_show_mask)
+        lay_display.addWidget(self.rb_show_bbox)
+        grp_display.setLayout(lay_display)
+
+        # 切換顯示模式即時重繪
+        self.display_group.idClicked.connect(lambda _id: self._update_canvas())
+
+        # [新增] 輸出模式切換時也要重繪（為了 BBox 聯集時只畫一個框）
+        self.mode_group.idClicked.connect(lambda _id: self._update_canvas())
+
+        # [新增] 建立在 grp_mode 與 grp_save 之間，與其它群組同一層級
+        grp_labels = QGroupBox("輸出標註格式")
+        self.chk_yolo_det = QCheckBox("YOLO 檢測 bbox")
+        self.chk_yolo_seg = QCheckBox("YOLO 分割 polygon")
+
+        self.spn_cls = QSpinBox()
+        self.spn_cls.setRange(0, 999)
+        self.spn_cls.setValue(0)
+
+        lay_labels = QFormLayout()
+        lay_labels.addRow(self.chk_yolo_det)
+        lay_labels.addRow(self.chk_yolo_seg)
+        lay_labels.addRow("class_id", self.spn_cls)
+        grp_labels.setLayout(lay_labels)
 
         grp_save = QGroupBox("儲存")
         self.btn_save_selected = QPushButton("儲存已選目標(.png)")
@@ -239,6 +275,8 @@ class SegmentationViewer(QMainWindow):
         right_box.addWidget(grp_nav)
         right_box.addWidget(grp_crop)
         right_box.addWidget(grp_mode)
+        right_box.addWidget(grp_display)
+        right_box.addWidget(grp_labels)
         right_box.addWidget(grp_save)
         right_box.addWidget(grp_params)
         right_box.addStretch(1)
@@ -414,22 +452,59 @@ class SegmentationViewer(QMainWindow):
         path = self.image_paths[self.idx]
         bgr, masks, _ = self.cache[path]
         base = bgr.copy()
-        if self.selected_indices:
-            sel_union = np.zeros(base.shape[:2], dtype=np.uint8)
-            for i in self.selected_indices:
-                if 0 <= i < len(masks):
-                    sel_union = np.maximum(sel_union, masks[i])
-            base[sel_union > 0] = (base[sel_union > 0] * 0.4 + np.array([0, 255, 0]) * 0.6).astype(
-                np.uint8
+
+        # 顯示模式: 0=遮罩, 1=BBox
+        disp_id = self.display_group.checkedId() if hasattr(self, "display_group") else 0
+        use_bbox = disp_id == 1
+
+        # 輸出模式: 0=個別, 1=聯集
+        mode_id = self.mode_group.checkedId() if hasattr(self, "mode_group") else 0
+        is_union = mode_id == 1
+
+        if not use_bbox:
+            # 遮罩高亮模式
+            if self.selected_indices:
+                sel_union = np.zeros(base.shape[:2], dtype=np.uint8)
+                for i in self.selected_indices:
+                    if 0 <= i < len(masks):
+                        sel_union = np.maximum(sel_union, masks[i])
+                m = sel_union > 0
+                base[m] = (base[m] * 0.4 + np.array([0, 255, 0]) * 0.6).astype(np.uint8)
+
+            if self._hover_idx is not None and 0 <= self._hover_idx < len(masks):
+                m = masks[self._hover_idx] > 0
+                base[m] = (base[m] * 0.2 + np.array([0, 255, 0]) * 0.8).astype(np.uint8)
+                contours, _ = cv2.findContours(
+                    m.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                )
+                if contours:
+                    cv2.polylines(base, contours, True, (0, 255, 0), 2)
+
+        else:
+            # BBox 模式
+            H, W = base.shape[:2]
+            if is_union and self.selected_indices:
+                # 聯集 + BBox: 只畫一個框線
+                union_mask = np.zeros((H, W), dtype=np.uint8)
+                for i in self.selected_indices:
+                    if 0 <= i < len(masks):
+                        union_mask = np.maximum(union_mask, masks[i])
+                x, y, w, h = compute_bbox(union_mask > 0)
+                cv2.rectangle(base, (x, y), (x + w, y + h), (0, 255, 0), 3)
+            else:
+                # 個別 + BBox: 已選畫細線, 懸浮畫粗線
+                for i in self.selected_indices:
+                    if 0 <= i < len(masks):
+                        x, y, w, h = compute_bbox(masks[i] > 0)
+                        cv2.rectangle(base, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                if self._hover_idx is not None and 0 <= self._hover_idx < len(masks):
+                    x, y, w, h = compute_bbox(masks[self._hover_idx] > 0)
+                    cv2.rectangle(base, (x, y), (x + w, y + h), (0, 255, 0), 3)
+
+        if hasattr(self, "status"):
+            self.status.set_display_info(
+                "BBox" if use_bbox else "遮罩", is_union, len(self.selected_indices)
             )
-        if self._hover_idx is not None and 0 <= self._hover_idx < len(masks):
-            m = masks[self._hover_idx] > 0
-            base[m] = (base[m] * 0.2 + np.array([0, 255, 0]) * 0.8).astype(np.uint8)
-            contours, _ = cv2.findContours(
-                m.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
-            if contours:
-                cv2.polylines(base, contours, isClosed=True, color=(0, 255, 0), thickness=2)
         self.view.set_image_bgr(base)
 
     def _update_selected_count(self) -> None:
@@ -463,71 +538,100 @@ class SegmentationViewer(QMainWindow):
             self.status.message("取消儲存")
             return
         out_dir = Path(out_dir)
-        H, W = masks[0].shape
-        union = np.zeros((H, W), dtype=np.uint8)
+
+        H, W = bgr.shape[:2]
+        union_mask = np.zeros((H, W), dtype=np.uint8)
         for i in indices:
             if 0 <= i < len(masks):
-                union = np.maximum(union, (masks[i] > 0).astype(np.uint8))
+                union_mask = np.maximum(union_mask, (masks[i] > 0).astype(np.uint8))
 
-        u = (union * 255).astype(np.uint8)
-        k = max(3, int(round(min(H, W) * 0.003)) | 1)  # 隨影像大小自適應，且為奇數
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-        u = cv2.morphologyEx(u, cv2.MORPH_OPEN, kernel, iterations=1)
-        u = cv2.morphologyEx(u, cv2.MORPH_CLOSE, kernel, iterations=1)
-        union = (u > 127).astype(np.uint8)
+        base_name = f"{Path(path).stem}_union"
 
-        # 最大連通（排除非目標碎片）
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(union, connectivity=8)
-        if num_labels > 1:
-            areas = stats[1:, cv2.CC_STAT_AREA]
-            max_idx = int(areas.argmax()) + 1
-            union = (labels == max_idx).astype(np.uint8)
+        # 準備輸出影像 (BGRA)
         bgra = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)
-        bgra[..., 3] = union * 255
-        if self.crop_group.checkedId() == 1:
-            x, y, w, h = compute_bbox(union)
+        bgra[:, :, 3] = union_mask * 255
+
+        if self.rb_bbox.isChecked():
+            # 裁成聯集的外接矩形
+            x, y, w, h = compute_bbox(union_mask > 0)
             crop = bgra[y : y + h, x : x + w]
-            suffix = "_union_bbox"
+            img_h, img_w = h, w
+            # 標註以裁後影像為座標系
+            boxes = [(0, 0, w, h)]
+            poly = self._compute_polygon(union_mask[y : y + h, x : x + w])
+            polys = [poly]
         else:
+            # 原圖大小
             crop = bgra
-            suffix = "_union_full"
-        out_path = out_dir / f"{Path(path).stem}{suffix}.png"
+            img_h, img_w = H, W
+            x, y, w, h = compute_bbox(union_mask > 0)
+            boxes = [(x, y, w, h)]
+            poly = self._compute_polygon(union_mask > 0)
+            polys = [poly]
+
+        # 寫 PNG
         ok, buf = cv2.imencode(".png", crop)
         if ok:
-            out_path.write_bytes(buf.tobytes())
-            QMessageBox.information(self, "完成", f"已儲存：\n{out_path}")
+            (out_dir / f"{base_name}.png").write_bytes(buf.tobytes())
+            # 寫標註 (依勾選)
+            self._write_yolo_labels(out_dir, base_name, boxes, polys, img_w, img_h)
+            QMessageBox.information(self, "完成", "已儲存 1 個聯集物件")
             self.status.message("完成")
         else:
-            logger.error("PNG encode 失敗: %s", out_path)
-            QMessageBox.warning(self, "未儲存", "寫入失敗")
+            logger.error("PNG encode 失敗: %s", out_dir / f"{base_name}.png")
+            QMessageBox.warning(self, "未儲存", "沒有任何檔案被寫出")
 
     def _save_indices(self, indices: List[int]) -> None:
         path = self.image_paths[self.idx]
         bgr, masks, _ = self.cache[path]
-        use_bbox = self.crop_group.checkedId() == 1
         out_dir = QFileDialog.getExistingDirectory(self, "選擇儲存資料夾", str(Path(path).parent))
         if not out_dir:
             self.status.message("取消儲存")
             return
         out_dir = Path(out_dir)
+
         saved = 0
+        H, W = bgr.shape[:2]
+
         for i in indices:
-            if i < 0 or i >= len(masks):
+            if not (0 <= i < len(masks)):
                 continue
-            m = masks[i].astype(np.uint8)
+            m = masks[i] > 0
+
+            # 準備輸出影像 (BGRA)
             bgra = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)
-            bgra[..., 3] = (m > 0).astype(np.uint8) * 255
-            crop = bgra
-            if use_bbox:
+            bgra[:, :, 3] = m.astype(np.uint8) * 255
+
+            base_name = f"{Path(path).stem}_obj{i:03d}"
+
+            if self.rb_bbox.isChecked():
+                # 裁成該物件的最小外接矩形
                 x, y, w, h = compute_bbox(m)
                 crop = bgra[y : y + h, x : x + w]
-            out_path = out_dir / f"{Path(path).stem}_obj{i:03d}.png"
+                img_h, img_w = h, w
+                # 對應的標註：以裁後影像為座標系
+                boxes = [(0, 0, w, h)]
+                poly = self._compute_polygon(m[y : y + h, x : x + w])
+                polys = [poly]
+            else:
+                # 原圖大小
+                crop = bgra
+                img_h, img_w = H, W
+                x, y, w, h = compute_bbox(m)
+                boxes = [(x, y, w, h)]
+                poly = self._compute_polygon(m)
+                polys = [poly]
+
+            # 寫 PNG
             ok, buf = cv2.imencode(".png", crop)
             if ok:
-                out_path.write_bytes(buf.tobytes())
+                (out_dir / f"{base_name}.png").write_bytes(buf.tobytes())
                 saved += 1
+                # 寫標註 (依勾選)
+                self._write_yolo_labels(out_dir, base_name, boxes, polys, img_w, img_h)
             else:
-                logger.error("PNG encode 失敗: %s", out_path)
+                logger.error("PNG encode 失敗: %s", out_dir / f"{base_name}.png")
+
         if saved:
             QMessageBox.information(self, "完成", f"已儲存 {saved} 個物件")
             self.status.message("完成")
@@ -630,3 +734,53 @@ class SegmentationViewer(QMainWindow):
             QMessageBox.information(self, "提示", "尚未選擇任何目標")
             return
         self._save_union(sorted(self.selected_indices))
+
+    # [新增] 放在 SegmentationViewer 類別內其它私有方法旁
+
+    def _compute_polygon(self, mask: np.ndarray) -> Optional[np.ndarray]:
+        """回傳最大連通域的外輪廓座標，形狀為 (N,2)，整數像素座標。"""
+        m = (mask > 0).astype(np.uint8)
+        cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            return None
+        c = max(cnts, key=cv2.contourArea)
+        return c.reshape(-1, 2)  # (N,2)
+
+    def _write_yolo_labels(
+        self,
+        out_dir: Path,
+        base_name: str,
+        boxes: List[Tuple[int, int, int, int]],
+        polys: List[Optional[np.ndarray]],
+        img_w: int,
+        img_h: int,
+    ) -> None:
+        """依勾選輸出 YOLO 檢測與/或 YOLO 分割標註檔。兩者同時勾選時各自輸出到不同檔名。"""
+        cls_id = int(self.spn_cls.value()) if hasattr(self, "spn_cls") else 0
+
+        # YOLO 檢測: 每行 => cls xc yc w h (皆為 0~1)
+        if getattr(self, "chk_yolo_det", None) and self.chk_yolo_det.isChecked():
+            lines = []
+            for x, y, w, h in boxes:
+                if w <= 0 or h <= 0:
+                    continue
+                xc = (x + w / 2.0) / img_w
+                yc = (y + h / 2.0) / img_h
+                nw = w / img_w
+                nh = h / img_h
+                lines.append(f"{cls_id} {xc:.6f} {yc:.6f} {nw:.6f} {nh:.6f}")
+            if lines:
+                (out_dir / f"{base_name}_yolo.txt").write_text("\n".join(lines), encoding="utf-8")
+
+        # YOLO 分割: 每行 => cls x1 y1 x2 y2 ... (座標皆為 0~1)
+        if getattr(self, "chk_yolo_seg", None) and self.chk_yolo_seg.isChecked():
+            lines = []
+            for poly in polys:
+                if poly is None or len(poly) == 0:
+                    continue
+                pts = []
+                for px, py in poly:
+                    pts.append(f"{px / img_w:.6f} {py / img_h:.6f}")
+                lines.append(f"{cls_id} " + " ".join(pts))
+            if lines:
+                (out_dir / f"{base_name}_seg.txt").write_text("\n".join(lines), encoding="utf-8")
