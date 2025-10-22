@@ -190,7 +190,6 @@ class Actions:
     # -------------- 錄影 --------------
 
     def resume_recording(self):
-        from pathlib import Path
 
         out_dir = Path(self.w.dir_edit.text())
         _ensure_dir(out_dir)
@@ -228,9 +227,6 @@ class Actions:
     # 【修改】優先使用預設路徑，否則詢問下載，同意才下載，否則回退檔案選取
     def _ensure_sam_loaded_interactive(self) -> bool:
         """若 self.sam 未就緒，優先使用預設 ckpt；無檔時詢問下載，同意後才下載並載入；最後才回退檔案選取。"""
-        from pathlib import Path
-
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
 
         if _resolve_callable(self.sam, ["auto_masks_from_image"]):
             return True

@@ -17,7 +17,10 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
+    QDockWidget
 )
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
 
 
 def build_ui(win):
@@ -119,12 +122,19 @@ def build_ui(win):
     seg_box.setLayout(seg_layout)
     right_panel.addWidget(seg_box)
     right_panel.addStretch(1)
-    # 注意：不再把狀態 label 放在這裡（改由 StatusFooter 統一在整體視窗最下方）
+    
+    right_panel_widget = QWidget()
+    right_panel_widget.setLayout(right_panel)
+
+    win.dock_controls = QDockWidget("控制面板", win)
+    win.dock_controls.setObjectName("dock_controls")
+    win.dock_controls.setWidget(right_panel_widget)
+    win.dock_controls.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+    win.addDockWidget(Qt.RightDockWidgetArea, win.dock_controls)
 
     # 版面配置
     root = QHBoxLayout()
-    root.addWidget(win.video_widget, 2)
-    root.addLayout(right_panel, 1)
+    root.addWidget(win.video_widget)
     central.setLayout(root)
 
     # 在建立完各元件後加入 ToolTip

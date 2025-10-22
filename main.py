@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from modules.app.actions import Actions
@@ -86,6 +86,13 @@ class MainWindow(QMainWindow):
         update_ui_state(self)
         self.explorer_ctrl.refresh()
         self.ui_actions.populate_camera_devices()
+
+        view_menu = self.menuBar().addMenu("檢視")
+        self.act_toggle_controls = self.dock_controls.toggleViewAction()
+        self.act_toggle_controls.setText("顯示/隱藏控制面板")
+        self.act_toggle_controls.setShortcut(QKeySequence("F10"))
+        view_menu.addAction(self.act_toggle_controls)
+        self.addAction(self.act_toggle_controls)        
 
     # 新增到 MainWindow 類別內
     def _apply_global_style(self):
