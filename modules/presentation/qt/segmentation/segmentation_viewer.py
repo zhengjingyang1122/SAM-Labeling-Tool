@@ -292,10 +292,7 @@ class SegmentationViewer(QMainWindow):
         # 左側檔案樹 dock（與主視窗統一標題列文字按鈕）
         self._build_left_dock()
 
-        # 檢視選單：提供顯示/隱藏 Dock（F9）
-        self.menuView = self.menuBar().addMenu("檢視")
-        self.act_toggle_dock.setText("檔案視窗")
-        self.menuView.addAction(self.act_toggle_dock)
+
 
         mgr = get_app_shortcut_manager()
         mgr.register_viewer(self)

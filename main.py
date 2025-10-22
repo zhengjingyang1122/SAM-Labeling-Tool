@@ -36,17 +36,15 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Webcam Snapper - Modular Edition")
         self.resize(1100, 720)
 
-        # Controllers (exposed for UI state checks)
         self.cam = CameraManager(self)
         self.photo_ctrl: Optional[PhotoCapture] = None
         self.burst_ctrl: Optional[BurstShooter] = None
         self.rec_ctrl: Optional[VideoRecorder] = None
 
-        # Build UI (widgets & layout only)
         build_ui(self)
 
         self.status = StatusFooter.install(self)
-        self.status.message("狀態：待機")
+        self.status.message("狀態: 待機")
 
         log_p = "logs"
         lvl = "INFO"
@@ -65,38 +63,30 @@ class MainWindow(QMainWindow):
         rate_ms = 1500
         install_ui_targets(self, self.status, rate_limit_ms=rate_ms, popup_level=popup_lvl)
 
-        # 安裝 Qt 訊息代理, 使 Qt 警告也進入 logging
         install_qt_message_proxy()
 
-        # Left dock: file explorer controller
-        self.explorer_ctrl = ExplorerController(self, self.btn_toggle_explorer, self.dir_edit)
+        toggle_btn = getattr(self, "btn_toggle_explorer", None)
+        if toggle_btn is None:
+            from PySide6.QtWidgets import QPushButton
 
-        # Actions: all slots/logic are centralized here
+            toggle_btn = QPushButton(self)
+            toggle_btn.setVisible(False)
+        self.explorer_ctrl = ExplorerController(self, toggle_btn, self.dir_edit)
+
         self.ui_actions = Actions(self, self.cam, self.explorer_ctrl)
         mgr = get_app_shortcut_manager()
-        mgr.register_main(self, self.ui_actions, self.explorer_ctrl)
+        mgr.register_main(self, self.ui_actions)
         wire_ui(self, self.ui_actions)
 
-        # ✅ 加入全域樣式、快捷鍵、說明選單、首次導覽
         self._apply_global_style()
         self._install_help_menu()
         self._maybe_run_onboarding()
 
-        # Initial state & device list
         update_ui_state(self)
         self.explorer_ctrl.refresh()
         self.ui_actions.populate_camera_devices()
 
-        view_menu = self.menuBar().addMenu("檢視")
-        self.act_toggle_controls = self.dock_controls.toggleViewAction()
-        self.act_toggle_controls.setText("顯示/隱藏控制面板")
-        self.act_toggle_controls.setShortcut(QKeySequence("F10"))
-        view_menu.addAction(self.act_toggle_controls)
-        self.addAction(self.act_toggle_controls)        
-
-    # 新增到 MainWindow 類別內
     def _apply_global_style(self):
-        # 輕量現代化樣式表(Stylesheet), 不影響既有 SciFi 對話框
         self.setStyleSheet(
             """
         QWidget { font-size: 12px; }
@@ -125,8 +115,11 @@ class MainWindow(QMainWindow):
         act_keys = QAction("鍵盤快捷鍵", self)
 
         def _show_keys():
-            mgr = get_app_shortcut_manager()
-            mgr.show_shortcuts_dialog(self)
+            try:
+                mgr = get_app_shortcut_manager()
+                mgr.show_shortcuts_dialog(self)
+            except Exception as e:
+                QMessageBox.information(self, "快捷鍵", f"顯示快捷鍵失敗: {e}")
 
         act_keys.triggered.connect(_show_keys)
 

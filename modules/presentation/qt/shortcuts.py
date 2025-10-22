@@ -24,14 +24,12 @@ DEFAULT_SHORTCUTS: Dict[str, Dict[str, KeySeqLike]] = {
         "capture.photo": "Space",
         "record.start_resume": "R",
         "record.stop_save": "Shift+R",
-        "dock.toggle": "F9",
     },
     "viewer": {
         "nav.prev": ["Left", "PageUp"],
         "nav.next": ["Right", "PageDown"],
         "save.selected": ["S", "Ctrl+S"],
         "save.union": "U",
-        "dock.toggle": "F9",
         "window.close": "Esc",
     },
 }
@@ -54,7 +52,6 @@ class ShortcutManager:
         self._created_actions: list[QAction] = []
         self.load()
 
-    # ---------- load/save ----------
     def load(self) -> None:
         try:
             if self.config_path.exists():
@@ -63,7 +60,6 @@ class ShortcutManager:
                     for action_key, seqs in (table or {}).items():
                         self._map.setdefault(scope, {})[action_key] = _to_list(seqs)
         except Exception:
-            # 若使用者 JSON 壞掉，忽略以免整體掛掉
             pass
 
     def save(self) -> None:
@@ -71,7 +67,6 @@ class ShortcutManager:
         out = {s: {k: v for k, v in d.items()} for s, d in self._map.items()}
         self.config_path.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    # ---------- public API ----------
     def sequences(self, scope: str, action_key: str) -> list[str]:
         return list(self._map.get(scope, {}).get(action_key, []))
 
@@ -92,12 +87,11 @@ class ShortcutManager:
         self._created_actions.append(act)
         return act
 
-    def register_main(self, win: QWidget, actions, explorer_ctrl) -> None:
+    def register_main(self, win: QWidget, actions) -> None:
         mapping: Dict[Tuple[str, str], Union[QAction, Callable[[], None]]] = {
             ("main", "capture.photo"): actions.capture_image,
             ("main", "record.start_resume"): actions.resume_recording,
             ("main", "record.stop_save"): actions.stop_recording,
-            ("main", "dock.toggle"): explorer_ctrl.explorer.toggleViewAction(),  # QAction
         }
         for (scope, key), tgt in mapping.items():
             seqs = self.sequences(scope, key)
@@ -105,13 +99,11 @@ class ShortcutManager:
                 self.bind(win, seqs, tgt)
 
     def register_viewer(self, viewer) -> None:
-        # viewer 需具備 act_toggle_dock 這個 QAction
         mapping: Dict[Tuple[str, str], Union[QAction, Callable[[], None]]] = {
             ("viewer", "nav.prev"): viewer._prev_image,
             ("viewer", "nav.next"): viewer._next_image,
             ("viewer", "save.selected"): viewer._save_selected,
             ("viewer", "save.union"): viewer.save_union_hotkey,
-            ("viewer", "dock.toggle"): viewer.act_toggle_dock,  # QAction
             ("viewer", "window.close"): viewer.close,
         }
         for (scope, key), tgt in mapping.items():

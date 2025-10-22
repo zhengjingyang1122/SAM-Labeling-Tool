@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
-    QDockWidget
+    QDockWidget,
+    QStackedLayout,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
@@ -36,14 +37,10 @@ def build_ui(win):
     dir_box = QGroupBox("輸出路徑")
     win.dir_edit = QLineEdit(str((Path.home() / "Pictures").expanduser()))
     win.btn_browse = QPushButton("瀏覽")
-    win.btn_toggle_explorer = QPushButton("檔案瀏覽")
-    win.btn_toggle_explorer.setCheckable(True)
-    win.btn_toggle_explorer.setChecked(True)
     dir_layout = QHBoxLayout()
     dir_layout.addWidget(QLabel("資料夾:"))
     dir_layout.addWidget(win.dir_edit, 1)
     dir_layout.addWidget(win.btn_browse)
-    dir_layout.addWidget(win.btn_toggle_explorer)
     dir_box.setLayout(dir_layout)
 
     # 相機設備

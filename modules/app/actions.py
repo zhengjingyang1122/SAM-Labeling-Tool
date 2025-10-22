@@ -13,7 +13,6 @@ from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox
 from modules.presentation.qt.segmentation.segmentation_viewer import SegmentationViewer
 from modules.presentation.qt.ui_state import update_ui_state
 
-# 動態載入 sam_engine（不綁定固定 API 名稱）
 try:
     import modules.infrastructure.vision.sam_engine as sam_engine_mod
 except Exception:
@@ -26,7 +25,6 @@ DEFAULT_SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8
 logger = logging.getLogger(__name__)
 
 
-# ---------------- 小工具 ----------------
 def _ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
@@ -44,11 +42,11 @@ def _resolve_callable(obj: object, names: List[str]) -> Optional[Callable]:
 class Actions:
     """主視窗所有槽函式 / 操作邏輯"""
 
-    def __init__(self, win, cam, explorer_ctrl, sam_engine_instance: Optional[object] = None):
+    def __init__(self, win, cam, explorer_ctrl: Optional[object] = None, sam_engine_instance: Optional[object] = None):
         self.w = win
         self.cam = cam
         self.explorer = explorer_ctrl
-        self.sam = sam_engine_instance  # 可為 None 或 SamEngine 實例
+        self.sam = sam_engine_instance
         self._last_ckpt: Optional[Path] = None
 
         try:
@@ -68,7 +66,6 @@ class Actions:
     def _on_output_dir_changed(self, path: str) -> None:
         pass
 
-    # 供 main.py 用名稱選定裝置
     def select_camera_by_name(self, name: str) -> None:
         try:
             cb = self.w.cam_combo
@@ -79,14 +76,10 @@ class Actions:
         except Exception:
             pass
 
-    # -------------- 檔案/目錄 --------------
-
     def choose_dir(self):
         d = QFileDialog.getExistingDirectory(self.w, "選擇輸出資料夾", str(self.w.dir_edit.text()))
         if d:
             self.w.dir_edit.setText(d)
-
-    # -------------- 相機控制 --------------
 
     def populate_camera_devices(self):
         """把各種 list_devices() 回傳格式轉成 QComboBox 可接受的 (text, userData)。"""
@@ -144,6 +137,8 @@ class Actions:
     def stop_camera(self):
         try:
             self.cam.stop()
+            self.w.video_widget.setStyleSheet("background-color: black;")
+            self.w.video_widget.update()
             self.w.status.message("狀態：相機停止")
             update_ui_state(self.w)
         except Exception as e:
@@ -156,16 +151,11 @@ class Actions:
             QMessageBox.warning(self.w, "無法拍照", "相機尚未啟動或不支援拍照")
             return
         try:
-            # 交由公開方法自動命名與重試
             self.cam.photo.capture_single(out_dir)
-            if hasattr(self.explorer, "refresh"):
-                self.explorer.refresh()
             self.w.status.message("狀態：已拍照")
         except Exception as e:
             logger.exception("拍照失敗")
             QMessageBox.critical(self.w, "拍照失敗", str(e))
-
-    # -------------- 連拍 --------------
 
     def start_burst(self):
         if getattr(self.cam, "burst", None) is None:
@@ -178,16 +168,12 @@ class Actions:
         self.cam.burst.start(count, interval, out_dir)
         self.w.burst_ctrl = self.cam.burst
         update_ui_state(self.w)
-        if hasattr(self.explorer, "refresh"):
-            self.explorer.refresh()
 
     def stop_burst(self):
         if getattr(self.cam, "burst", None):
             self.cam.burst.stop()
         self.w.burst_ctrl = None
         update_ui_state(self.w)
-
-    # -------------- 錄影 --------------
 
     def resume_recording(self):
 
@@ -216,15 +202,10 @@ class Actions:
         try:
             self.w.rec_ctrl.stop()
             self.w.status.message("狀態：錄影停止")
-            if hasattr(self.explorer, "refresh"):
-                self.explorer.refresh()
         except Exception as e:
             logger.exception("停止錄影錯誤")
             QMessageBox.critical(self.w, "停止錄影錯誤", str(e))
 
-    # -------------- SAM 載入 --------------
-
-    # 【修改】優先使用預設路徑，否則詢問下載，同意才下載，否則回退檔案選取
     def _ensure_sam_loaded_interactive(self) -> bool:
         """若 self.sam 未就緒，優先使用預設 ckpt；無檔時詢問下載，同意後才下載並載入；最後才回退檔案選取。"""
 
@@ -238,13 +219,11 @@ class Actions:
 
         ckpt: Optional[Path] = self._last_ckpt
 
-        # 1) 嘗試使用預設路徑
         if ckpt is None or not Path(ckpt).exists():
             default = DEFAULT_SAM_CKPT
             if default.exists():
                 ckpt = default
             else:
-                # 2) 詢問是否下載，使用者同意就下載
                 try:
                     maybe = self._download_sam_with_prompt()
                     if maybe is not None:
@@ -253,7 +232,6 @@ class Actions:
                     logger.exception("下載 SAM 權重失敗")
                     QMessageBox.critical(self.w, "下載 SAM 權重失敗", str(e))
 
-        # 3) 若仍沒有 ckpt，回退到舊的檔案選取流程
         if ckpt is None or not Path(ckpt).exists():
             f, _ = QFileDialog.getOpenFileName(
                 self.w, "選擇 SAM 權重檔 .pth", str(Path.home()), "SAM Checkpoint (*.pth *.pt)"
@@ -263,7 +241,7 @@ class Actions:
             ckpt = Path(f)
 
         try:
-            model_type = DEFAULT_SAM_MODEL_TYPE  # 預設使用 vit_h
+            model_type = DEFAULT_SAM_MODEL_TYPE
             self.sam = sam_engine_mod.SamEngine(Path(ckpt), model_type=model_type)
             self.w.status.start_scifi_simulated("載入 SAM 模型中...", start=25, stop_at=99)
             self.sam.load()
@@ -296,13 +274,9 @@ class Actions:
                     self.w.status.message("狀態：模型已卸載")
                 self.sam = None
             except Exception as e:
-                # 萬一發生例外，關掉彈窗並提示
                 self.w.status.stop_scifi("狀態：模型卸載失敗")
                 QMessageBox.warning(self.w, "卸載警告", str(e))
 
-    # -------------- 自動分割：彈出選單入口 --------------
-
-    # 取代原 open_auto_segment_menu
     def open_auto_segment_menu(self):
         btn = getattr(self.w, "btn_auto_seg_image", None)
         menu = QMenu(self.w)
@@ -321,8 +295,6 @@ class Actions:
             menu.exec(pos)
         else:
             menu.exec(self.w.mapToGlobal(self.w.rect().center()))
-
-    # -------------- 自動分割：Helper --------------
 
     def _collect_images_from_dir(self, pivot: Path) -> List[Path]:
         exts = {".png", ".jpg", ".jpeg", ".bmp"}
@@ -357,11 +329,9 @@ class Actions:
             )
             return False
 
-    # 取代原 _make_compute_fn_for_image
     def _make_compute_fn_for_image(self):
         if not self._ensure_sam_available(interactive=True):
             raise RuntimeError("已取消載入 SAM 模型")
-        # 優先使用快取版
         fn_cached = getattr(self.sam, "auto_masks_from_image_cached", None)
         if callable(fn_cached):
             return lambda img_path, points_per_side, pred_iou_thresh: fn_cached(
@@ -384,7 +354,6 @@ class Actions:
             video_path, points_per_side=points_per_side, pred_iou_thresh=pred_iou_thresh
         )
 
-    # -------------- 自動分割：分支 --------------
 
     def open_segmentation_view_for_chosen_image(self):
         if not self._ensure_sam_available(interactive=True):
@@ -413,7 +382,6 @@ class Actions:
             return
         compute_masks_fn = self._make_compute_fn_for_image()
 
-        # 批次先建立/更新快取：已有 embedding 的影像會自動略過重算
         try:
             self.w.status.start_scifi("批次分割中：建立快取與 embedding")
             for p in imgs:
@@ -477,10 +445,8 @@ class Actions:
             [Path(vp)], compute_masks_fn, title=f"影片第一幀分割檢視（{Path(vp).name}）"
         )
 
-    # -------------- 開啟分割檢視（共用） --------------
 
     def _open_view(self, image_paths, compute_masks_fn, title: str):
-        # 保留視窗引用，避免被 GC
         if not hasattr(self, "_seg_windows"):
             self._seg_windows = []
         params = {
@@ -492,7 +458,7 @@ class Actions:
         }
 
         viewer = SegmentationViewer(
-            None,  # 原本是 None，改成主視窗作為父層
+            None,  
             image_paths,
             compute_masks_fn,
             params_defaults=params,
@@ -501,7 +467,6 @@ class Actions:
         viewer.setAttribute(Qt.WA_DeleteOnClose, True)
         viewer.setWindowFlag(Qt.Window, True)
 
-        # 視窗關閉時，移除引用
         def _drop_ref(*_):
             if viewer in self._seg_windows:
                 self._seg_windows.remove(viewer)
@@ -543,7 +508,6 @@ class Actions:
                     percent = int(min(100, (blocknum * blocksize * 100) // totalsize))
                     if percent != last_percent:
                         last_percent = percent
-                        # 顯示百分比並讓 UI 及時更新
                         self.w.status.set_scifi_progress(percent, f"下載 SAM 權重中... {percent}%")
 
             urlretrieve(DEFAULT_SAM_URL, str(dst), reporthook=hook)
@@ -554,20 +518,18 @@ class Actions:
             logger.exception("下載 SAM 權重失敗")
             QMessageBox.critical(self.w, "下載失敗", str(e))
             try:
-                # 下載失敗時清掉未完成檔
                 if dst.exists():
                     dst.unlink()
             except Exception:
                 logger.warning("清理未完成 SAM 權重暫存檔失敗", exc_info=True)
             return None
 
-    # 新增：由 Dock 多選觸發, 選幾張就開幾個視窗
     def open_segmentation_for_file_list(self, paths: list[str]):
         if not paths:
             return
         if not self._ensure_sam_available(interactive=True):
             return
-        compute_masks_fn = self._make_compute_fn_for_image()  # 一次建立
+        compute_masks_fn = self._make_compute_fn_for_image()
         for s in paths:
             p = Path(s)
             if not p.exists() or not p.is_file():
