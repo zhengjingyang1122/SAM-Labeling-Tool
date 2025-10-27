@@ -7,7 +7,7 @@ from typing import Optional
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QInputDialog
 
 from modules.app.actions import Actions
 from modules.infrastructure.devices.camera_manager import CameraManager
@@ -74,11 +74,13 @@ class MainWindow(QMainWindow):
         self.explorer_ctrl = ExplorerController(self, toggle_btn, self.dir_edit)
 
         self.ui_actions = Actions(self, self.cam, self.explorer_ctrl)
+        self.cam.focusUpdated.connect(self.ui_actions._on_focus_updated)
         mgr = get_app_shortcut_manager()
         mgr.register_main(self, self.ui_actions)
         wire_ui(self, self.ui_actions)
 
         self._apply_global_style()
+        self._install_options_menu() # 新增選項選單
         self._install_help_menu()
         self._maybe_run_onboarding()
 
@@ -136,6 +138,22 @@ class MainWindow(QMainWindow):
         m.addAction(act_tour)
         m.addAction(act_keys)
         m.addAction(act_logs)
+
+    def _install_options_menu(self):
+        m = self.menuBar().addMenu("選項")
+        act_set_threshold = QAction("設定清晰度閾值...", self)
+
+        def _show_threshold_dialog():
+            current_val = self.cam.get_focus_threshold()
+            new_val, ok = QInputDialog.getInt(
+                self, "清晰度閾值", "請輸入新的閾值 (建議值 50-300):", int(current_val), 0, 10000, 10
+            )
+            if ok:
+                self.cam.set_focus_threshold(new_val)
+                self.status.message_temp(f"清晰度閾值已更新為: {new_val}", 2000)
+
+        act_set_threshold.triggered.connect(_show_threshold_dialog)
+        m.addAction(act_set_threshold)
 
     def _maybe_run_onboarding(self):
         pass

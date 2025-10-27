@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDockWidget,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -15,13 +17,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSpinBox,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
-    QDockWidget,
-    QStackedLayout,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence
 
 
 def build_ui(win):
@@ -119,7 +118,7 @@ def build_ui(win):
     seg_box.setLayout(seg_layout)
     right_panel.addWidget(seg_box)
     right_panel.addStretch(1)
-    
+
     right_panel_widget = QWidget()
     right_panel_widget.setLayout(right_panel)
 

@@ -42,7 +42,13 @@ def _resolve_callable(obj: object, names: List[str]) -> Optional[Callable]:
 class Actions:
     """主視窗所有槽函式 / 操作邏輯"""
 
-    def __init__(self, win, cam, explorer_ctrl: Optional[object] = None, sam_engine_instance: Optional[object] = None):
+    def __init__(
+        self,
+        win,
+        cam,
+        explorer_ctrl: Optional[object] = None,
+        sam_engine_instance: Optional[object] = None,
+    ):
         self.w = win
         self.cam = cam
         self.explorer = explorer_ctrl
@@ -127,9 +133,10 @@ class Actions:
                 self.cam.set_selected_device_index(idx)
             except Exception:
                 pass
-            self.cam.start(self.w.video_widget)
-            self.w.status.message("狀態：相機啟動")
 
+            # 再啟動相機與預覽
+            self.cam.start(self.w.video_widget)
+            self.w.status.message("狀態: 相機啟動")
             update_ui_state(self.w)
         except Exception as e:
             QMessageBox.critical(self.w, "相機啟動失敗", str(e))
@@ -354,7 +361,6 @@ class Actions:
             video_path, points_per_side=points_per_side, pred_iou_thresh=pred_iou_thresh
         )
 
-
     def open_segmentation_view_for_chosen_image(self):
         if not self._ensure_sam_available(interactive=True):
             return
@@ -445,7 +451,6 @@ class Actions:
             [Path(vp)], compute_masks_fn, title=f"影片第一幀分割檢視（{Path(vp).name}）"
         )
 
-
     def _open_view(self, image_paths, compute_masks_fn, title: str):
         if not hasattr(self, "_seg_windows"):
             self._seg_windows = []
@@ -458,7 +463,7 @@ class Actions:
         }
 
         viewer = SegmentationViewer(
-            None,  
+            None,
             image_paths,
             compute_masks_fn,
             params_defaults=params,
@@ -524,15 +529,9 @@ class Actions:
                 logger.warning("清理未完成 SAM 權重暫存檔失敗", exc_info=True)
             return None
 
-    def open_segmentation_for_file_list(self, paths: list[str]):
-        if not paths:
-            return
-        if not self._ensure_sam_available(interactive=True):
-            return
-        compute_masks_fn = self._make_compute_fn_for_image()
-        for s in paths:
-            p = Path(s)
-            if not p.exists() or not p.is_file():
-                continue
-            imgs = self._collect_images_with_pivot_first(p)
-            self._open_view(imgs, compute_masks_fn, title=f"自動分割檢視（{p.name}）")
+    def _on_focus_updated(self, score: float, sharp: bool):
+        try:
+            self.w.status.set_focus_quality(score, sharp)
+        except Exception:
+            # 備援: 如果 set_focus_quality 失敗, 至少在主訊息區顯示
+            self.w.status.message_temp(f"{'清晰' if sharp else '模糊'} ({score:.0f})", 800)

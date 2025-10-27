@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+# 既有 import 區塊若尚未匯入 Qt, 請補上
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
 class StatusFooter(QStatusBar):
     """統一美化的底部狀態列：訊息 + 進度（支援忙碌/不定進度 與 定量進度）"""
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QMainWindow] = None):
         super().__init__(parent)
         self.setObjectName("UnifiedStatusFooter")
 
@@ -46,30 +47,34 @@ class StatusFooter(QStatusBar):
         lay.addWidget(self._progress, 0)
         self.addPermanentWidget(wrap, 1)
 
+        self._focus = QLabel("-", self)
+        self._focus.setMinimumWidth(120)
+        self.addPermanentWidget(self._focus)
+
         # style
         self.setStyleSheet(
             """
-#UnifiedStatusFooter {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                stop:0 #2b2f36, stop:1 #22252b);
-    color: #e8eaed;
-    border-top: 1px solid #3a3f47;
-    font-size: 12px;
-}
-#StatusMessageLabel {
-    color: #e8eaed;
-}
-#StatusProgressBar {
-    background: #1b1e23;
-    border: 1px solid #3a3f47;
-    border-radius: 7px;
-}
-#StatusProgressBar::chunk {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                stop:0 #00b894, stop:1 #00cec9);
-    border-radius: 6px;
-}
-"""
+        #UnifiedStatusFooter {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 #2b2f36, stop:1 #22252b);
+            color: #e8eaed;
+            border-top: 1px solid #3a3f47;
+            font-size: 12px;
+        }
+        #StatusMessageLabel {
+            color: #e8eaed;
+        }
+        #StatusProgressBar {
+            background: #1b1e23;
+            border: 1px solid #3a3f47;
+            border-radius: 7px;
+        }
+        #StatusProgressBar::chunk {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #00b894, stop:1 #00cec9);
+            border-radius: 6px;
+        }
+        """
         )
 
         # 暫時訊息
@@ -84,7 +89,8 @@ class StatusFooter(QStatusBar):
         self._meta = QLabel("", self)
         self._meta.setObjectName("StatusMetaLabel")
         self._meta.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.addPermanentWidget(self._meta, 0)
+        self._meta.setMinimumWidth(180)
+        self.addPermanentWidget(self._meta, 1)
 
         self._img_wh = None
         self._cur_xy = None
@@ -101,6 +107,15 @@ class StatusFooter(QStatusBar):
         self._sim_step = 1
 
     # ---------- 公開 API ----------
+    def set_focus_quality(self, score: float, ok: bool) -> None:
+        """更新對焦分數與狀態"""
+        icon = "✔" if ok else "✖"
+        self._focus.setText(f"清晰度 {icon} {score:.0f}")
+        if ok:
+            self._focus.setStyleSheet("color: #00dd00;")
+        else:
+            self._focus.setStyleSheet("color: #ff4444;")
+
     def message(self, text: str) -> None:
         self._last_persist_msg = text
         self._msg.setText(text)
@@ -214,11 +229,11 @@ class StatusFooter(QStatusBar):
             parts.append(f"{self._img_wh[0]}x{self._img_wh[1]}")
         if self._cur_xy:
             parts.append(f"({self._cur_xy[0]},{self._cur_xy[1]})")
-        # [新增] 顯示模式/聯集/已選
         if getattr(self, "_display_mode", None):
             parts.append(f"顯示:{self._display_mode}")
             parts.append(f"聯集:{'ON' if self._is_union else 'OFF'}")
             parts.append(f"已選:{self._selected_count}")
+
         self._meta.setText(" | ".join(parts))
 
     # 模擬載入進度：從 25% 慢慢跑到 99%，等待實際完成後才補 100%

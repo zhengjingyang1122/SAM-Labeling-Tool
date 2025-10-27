@@ -5,7 +5,15 @@ import logging
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import QObject
+import cv2  # ← 新增
+
+# 建議放在檔頭
+import numpy as np  # ← 新增
+
+# 既有 import 區段中補上：
+from PySide6.QtCore import QObject, QTimer, Signal  # ← 新增 Signal
+from PySide6.QtGui import QImage
+from PySide6.QtMultimedia import QVideoSink  # ← 新增
 from PySide6.QtMultimedia import (
     QAudioInput,
     QCamera,
@@ -22,11 +30,14 @@ from modules.infrastructure.io.burst import BurstShooter
 from modules.infrastructure.io.photo import PhotoCapture
 from modules.infrastructure.io.recorder import VideoRecorder
 
+from PySide6.QtMultimedia import QVideoFrame
+
 logger = logging.getLogger(__name__)
 
 
 class CameraManager(QObject):
     """封裝相機裝置清單、啟停、Session 與控制器建置"""
+    focusUpdated = Signal(float, bool)
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -37,10 +48,53 @@ class CameraManager(QObject):
         self._audio: Optional[QAudioInput] = None
         self._selected: Optional[QCameraDevice] = None
 
+        self._focus_threshold: float = 120.0
+        self._frame_counter: int = 0
+
         # 封裝後對外提供的控制器
         self.photo: Optional[PhotoCapture] = None
         self.burst: Optional[BurstShooter] = None
         self.rec: Optional[VideoRecorder] = None
+
+    def _on_focus_score_calculated(self, score: float):
+        """接收來自 Sink 的原始分數, 判斷後對外發射最終訊號"""
+        if score < 1.0:  # 過濾掉純黑畫面等無效分數
+            return
+        is_sharp = score >= self._focus_threshold
+        self.focusUpdated.emit(score, is_sharp)
+
+    def set_focus_threshold(self, value: float):
+        self._focus_threshold = max(0, float(value))
+
+    def get_focus_threshold(self) -> float:
+        return self._focus_threshold
+
+    def _process_frame(self, frame: QVideoFrame):
+        """此方法在 videoSink().videoFrameChanged 訊號觸發時執行"""
+        try:
+            self._frame_counter += 1
+            if self._frame_counter % 5 != 0:  # 每 5 幀評估一次以降低負載
+                return
+
+            if not frame.isValid() or frame.size().isEmpty():
+                return
+
+            img = frame.toImage()
+            if img.isNull():
+                return
+
+            if img.format() != QImage.Format.Format_Grayscale8:
+                img = img.convertToFormat(QImage.Format.Format_Grayscale8)
+
+            ptr = img.constBits()
+            arr = np.frombuffer(ptr, np.uint8).reshape(img.height(), img.bytesPerLine())[:, :img.width()]
+
+            score = float(cv2.Laplacian(arr, cv2.CV_64F).var())
+
+            self._on_focus_score_calculated(score)
+
+        except Exception:
+            logger.debug("Frame processing for focus score failed", exc_info=True)
 
     # ---- 裝置清單 ----
     def list_devices(self) -> list[tuple[str, QCameraDevice]]:
@@ -76,7 +130,15 @@ class CameraManager(QObject):
         self._session = QMediaCaptureSession()
         self._session.setCamera(self._camera)
 
+        # 1. 設定 UI 顯示
         self._session.setVideoOutput(video_widget)
+
+        # 2. 連接影像幀處理
+        sink = video_widget.videoSink()
+        if sink:
+            sink.videoFrameChanged.connect(self._process_frame)
+        else:
+            logger.warning("無法從 QVideoWidget 取得 videoSink，對焦計算功能將被停用。")
 
         self._image = QImageCapture()
         self._session.setImageCapture(self._image)
@@ -155,3 +217,5 @@ class CameraManager(QObject):
             from PySide6.QtMultimedia import QCamera as _QCam
 
             return self._camera.cameraState() == _QCam.ActiveState
+
+
