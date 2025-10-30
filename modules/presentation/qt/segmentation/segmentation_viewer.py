@@ -157,6 +157,7 @@ class SegmentationViewer(QMainWindow):
         ],
         params_defaults: Optional[Dict[str, float]] = None,
         title: str = "分割檢視",
+        path_manager: Optional["PathManager"] = None,  # 注入 PathManager
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -166,6 +167,7 @@ class SegmentationViewer(QMainWindow):
         self.image_paths: List[Path] = list(image_paths)
         self.idx: int = 0
         self.compute_masks_fn = compute_masks_fn
+        self.pm = path_manager  # 保存 PathManager 實例
         self.params = {
             "points_per_side": int((params_defaults or {}).get("points_per_side", 32)),
             "pred_iou_thresh": float((params_defaults or {}).get("pred_iou_thresh", 0.88)),
@@ -530,11 +532,20 @@ class SegmentationViewer(QMainWindow):
     def _save_union(self, indices: List[int]) -> None:
         path = self.image_paths[self.idx]
         bgr, masks, _ = self.cache[path]
-        out_dir = QFileDialog.getExistingDirectory(self, "選擇儲存資料夾", str(Path(path).parent))
+        source_name = Path(path).stem
+
+        out_dir = None
+        if self.pm:
+            source_name = self.pm.get_source_name(path)
+            out_dir = self.pm.get_objects_dir(source_name)
+        else:
+            d = QFileDialog.getExistingDirectory(self, "選擇儲存資料夾", str(Path(path).parent))
+            if d:
+                out_dir = Path(d)
+
         if not out_dir:
             self.status.message("取消儲存")
             return
-        out_dir = Path(out_dir)
 
         H, W = bgr.shape[:2]
         union_mask = np.zeros((H, W), dtype=np.uint8)
@@ -542,7 +553,7 @@ class SegmentationViewer(QMainWindow):
             if 0 <= i < len(masks):
                 union_mask = np.maximum(union_mask, (masks[i] > 0).astype(np.uint8))
 
-        base_name = f"{Path(path).stem}_union"
+        base_name = "union"
 
         # 準備輸出影像 (BGRA)
         bgra = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)
@@ -581,11 +592,20 @@ class SegmentationViewer(QMainWindow):
     def _save_indices(self, indices: List[int]) -> None:
         path = self.image_paths[self.idx]
         bgr, masks, _ = self.cache[path]
-        out_dir = QFileDialog.getExistingDirectory(self, "選擇儲存資料夾", str(Path(path).parent))
+
+        out_dir = None
+        source_name = Path(path).stem
+        if self.pm:
+            source_name = self.pm.get_source_name(path)
+            out_dir = self.pm.get_objects_dir(source_name)
+        else:
+            d = QFileDialog.getExistingDirectory(self, "選擇儲存資料夾", str(Path(path).parent))
+            if d:
+                out_dir = Path(d)
+
         if not out_dir:
             self.status.message("取消儲存")
             return
-        out_dir = Path(out_dir)
 
         saved = 0
         H, W = bgr.shape[:2]
@@ -599,7 +619,7 @@ class SegmentationViewer(QMainWindow):
             bgra = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)
             bgra[:, :, 3] = m.astype(np.uint8) * 255
 
-            base_name = f"{Path(path).stem}_obj{i:03d}"
+            base_name = f"{i:03d}"
 
             if self.rb_bbox.isChecked():
                 # 裁成該物件的最小外接矩形

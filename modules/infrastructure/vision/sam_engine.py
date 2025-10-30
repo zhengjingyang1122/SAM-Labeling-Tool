@@ -1,6 +1,7 @@
 # modules/sam_engine.py
 import logging
 from pathlib import Path
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -67,27 +68,17 @@ class SamEngine:
     def is_loaded(self) -> bool:
         return self._sam is not None
 
-    # 加到 SamEngine 類別內
-
-    def embedding_path_for(self, img_path: Path) -> Path:
-        p = Path(img_path)
-        return p.with_suffix(p.suffix + ".sam_embed.npz")
-
-    def masks_cache_path_for(self, img_path: Path) -> Path:
-        p = Path(img_path)
-        return p.with_suffix(p.suffix + ".sam_masks.npz")
-
-    def has_embedding(self, img_path: Path) -> bool:
-        return self.embedding_path_for(img_path).exists()
-
-    # 加到 SamEngine 類別內
-
     def auto_masks_from_image_cached(
-        self, img_path: Path, points_per_side=32, pred_iou_thresh=0.88
+        self,
+        img_path: Path,
+        points_per_side=32,
+        pred_iou_thresh=0.88,
+        embedding_path: Optional[Path] = None,
+        masks_path: Optional[Path] = None,
     ):
         self._ensure_loaded()
         img_path = Path(img_path)
-        mask_p = self.masks_cache_path_for(img_path)
+        mask_p = masks_path or img_path.with_suffix(img_path.suffix + ".sam_masks.npz")
 
         # 1) 有快取就直接讀
         if mask_p.exists():
@@ -118,7 +109,7 @@ class SamEngine:
             emb = predictor.get_image_embedding().cpu().numpy()
             original_size = np.array(predictor.original_size, dtype=np.int32)
             input_size = np.array(predictor.input_size, dtype=np.int32)
-            emb_p = self.embedding_path_for(img_path)
+            emb_p = embedding_path or img_path.with_suffix(img_path.suffix + ".sam_embed.npz")
             np.savez_compressed(
                 str(emb_p),
                 embedding=emb.astype(np.float32),

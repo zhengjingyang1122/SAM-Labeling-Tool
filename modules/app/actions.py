@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox
 
 from modules.presentation.qt.segmentation.segmentation_viewer import SegmentationViewer
 from modules.presentation.qt.ui_state import update_ui_state
+from utils.utils import clear_current_path_manager
 
 try:
     import modules.infrastructure.vision.sam_engine as sam_engine_mod
@@ -152,8 +153,8 @@ class Actions:
             QMessageBox.critical(self.w, "相機停止失敗", str(e))
 
     def capture_image(self):
+        clear_current_path_manager()
         out_dir = Path(self.w.dir_edit.text())
-        _ensure_dir(out_dir)
         if getattr(self.cam, "photo", None) is None:
             QMessageBox.warning(self.w, "無法拍照", "相機尚未啟動或不支援拍照")
             return
@@ -168,8 +169,8 @@ class Actions:
         if getattr(self.cam, "burst", None) is None:
             QMessageBox.warning(self.w, "無法連拍", "相機尚未啟動或不支援連拍")
             return
+        clear_current_path_manager()
         out_dir = Path(self.w.dir_edit.text())
-        _ensure_dir(out_dir)
         count = int(self.w.burst_count.value())
         interval = int(self.w.burst_interval.value())
         self.cam.burst.start(count, interval, out_dir)
@@ -183,9 +184,8 @@ class Actions:
         update_ui_state(self.w)
 
     def resume_recording(self):
-
+        clear_current_path_manager()
         out_dir = Path(self.w.dir_edit.text())
-        _ensure_dir(out_dir)
         if getattr(self.cam, "rec", None) is None:
             logger.warning("錄影控制器不存在或相機未啟動")
             QMessageBox.warning(self.w, "無法錄影", "相機尚未啟動或不支援錄影")
@@ -339,18 +339,38 @@ class Actions:
     def _make_compute_fn_for_image(self):
         if not self._ensure_sam_available(interactive=True):
             raise RuntimeError("已取消載入 SAM 模型")
-        fn_cached = getattr(self.sam, "auto_masks_from_image_cached", None)
-        if callable(fn_cached):
-            return lambda img_path, points_per_side, pred_iou_thresh: fn_cached(
-                img_path, points_per_side=points_per_side, pred_iou_thresh=pred_iou_thresh
-            )
-        fn = getattr(self.sam, "auto_masks_from_image", None)
-        if not callable(fn):
-            raise RuntimeError("目前的 SamEngine 不支援 auto_masks_from_image")
-        return lambda img_path, points_per_side, pred_iou_thresh: fn(
-            img_path, points_per_side=points_per_side, pred_iou_thresh=pred_iou_thresh
-        )
 
+        from utils.utils import get_path_manager
+        from modules.infrastructure.io.path_manager import PathManager
+
+        fn_cached = getattr(self.sam, "auto_masks_from_image_cached", None)
+        if not callable(fn_cached):
+            raise RuntimeError("目前的 SamEngine 不支援 auto_masks_from_image_cached")
+
+        def compute_fn(img_path, points_per_side, pred_iou_thresh):
+            # 從影像路徑反推 timestamp 和 base_dir
+            try:
+                p = Path(img_path)
+                timestamp = p.parent.parent.name
+                base_dir = p.parent.parent.parent
+                pm = get_path_manager(base_dir, timestamp=timestamp)
+                source_name = pm.get_source_name(p)
+                embedding_path = pm.get_embedding_path(source_name)
+                masks_path = pm.get_masks_path(source_name)
+            except Exception:
+                # 如果路徑不符合預期結構，則退回舊版行為，不使用特定路徑
+                embedding_path = None
+                masks_path = None
+
+            return fn_cached(
+                img_path,
+                points_per_side=points_per_side,
+                pred_iou_thresh=pred_iou_thresh,
+                embedding_path=embedding_path,
+                masks_path=masks_path,
+            )
+
+        return compute_fn
     def _make_compute_fn_for_video_first_frame(self, video_path: Path):
         if not self._ensure_sam_available(interactive=True):
             raise RuntimeError("已取消載入 SAM 模型")
@@ -454,6 +474,19 @@ class Actions:
     def _open_view(self, image_paths, compute_masks_fn, title: str):
         if not hasattr(self, "_seg_windows"):
             self._seg_windows = []
+        
+        from utils.utils import get_path_manager
+        base_dir = Path(self.w.dir_edit.text())
+        pm = None
+        try:
+            # 從第一個影像的路徑反推 path manager
+            p = Path(image_paths[0])
+            timestamp = p.parent.parent.name
+            pm = get_path_manager(base_dir, timestamp=timestamp)
+        except Exception:
+            # 如果路徑不符合預期，可能是一個外部檔案，不使用 pm
+            pass
+
         params = {
             "points_per_side": self.default_params["points_per_side"],
             "pred_iou_thresh": self.default_params["pred_iou_thresh"],
@@ -468,6 +501,7 @@ class Actions:
             compute_masks_fn,
             params_defaults=params,
             title=title,
+            path_manager=pm, # 注入 path_manager
         )
         viewer.setAttribute(Qt.WA_DeleteOnClose, True)
         viewer.setWindowFlag(Qt.Window, True)
