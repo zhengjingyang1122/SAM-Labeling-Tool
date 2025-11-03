@@ -6,7 +6,7 @@ from typing import Optional
 import cv2
 import numpy as np
 import torch
-from segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
+from .segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
 
 logger = logging.getLogger(__name__)
 

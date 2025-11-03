@@ -15,8 +15,8 @@ from modules.presentation.qt.ui_state import update_ui_state
 from utils.utils import clear_current_path_manager
 
 try:
-    import modules.infrastructure.vision.sam_engine as sam_engine_mod
-except Exception:
+    from ..infrastructure.vision import sam_engine as sam_engine_mod
+except ImportError:
     sam_engine_mod = None
 
 DEFAULT_SAM_MODEL_TYPE = "vit_h"
@@ -220,7 +220,7 @@ class Actions:
             return True
         if sam_engine_mod is None or not hasattr(sam_engine_mod, "SamEngine"):
             QMessageBox.warning(
-                self.w, "無法載入", "找不到 SamEngine 類別，請確認 modules/sam_engine.py"
+                self.w, "無法載入", "找不到 SamEngine 類別，請確認 modules/infrastructure/vision/sam_engine.py"
             )
             return False
 
