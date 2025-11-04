@@ -5,11 +5,15 @@ import json
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Optional, Tuple, Union
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -87,7 +91,13 @@ class ShortcutManager:
         self._created_actions.append(act)
         return act
 
+    def clear_actions(self, widget: QWidget) -> None:
+        for act in self._created_actions:
+            widget.removeAction(act)
+        self._created_actions.clear()
+
     def register_main(self, win: QWidget, actions) -> None:
+        self.clear_actions(win) # Clear existing actions before re-registering
         mapping: Dict[Tuple[str, str], Union[QAction, Callable[[], None]]] = {
             ("main", "capture.photo"): actions.capture_image,
             ("main", "record.start_resume"): actions.resume_recording,
@@ -99,6 +109,7 @@ class ShortcutManager:
                 self.bind(win, seqs, tgt)
 
     def register_viewer(self, viewer) -> None:
+        self.clear_actions(viewer) # Clear existing actions before re-registering
         mapping: Dict[Tuple[str, str], Union[QAction, Callable[[], None]]] = {
             ("viewer", "nav.prev"): viewer._prev_image,
             ("viewer", "nav.next"): viewer._next_image,
@@ -111,7 +122,7 @@ class ShortcutManager:
             if seqs:
                 self.bind(viewer, seqs, tgt)
 
-    def show_shortcuts_dialog(self, parent: QWidget) -> None:
+    def show_shortcuts_dialog(self, parent: QWidget, win: QWidget, actions) -> None:
         rows = []
         for scope, table in self._map.items():
             for key, seqs in table.items():
@@ -128,14 +139,86 @@ class ShortcutManager:
             table.setItem(r, 2, QTableWidgetItem(seq))
         table.resizeColumnsToContents()
 
-        btn = QPushButton("關閉", dlg)
-        btn.clicked.connect(dlg.accept)
+        def _edit_shortcut(row, column):
+            if column != 2: # Only edit the 'Keys' column
+                return
+
+            scope = table.item(row, 0).text()
+            key = table.item(row, 1).text()
+            old_seq = table.item(row, 2).text()
+
+            new_seq, ok = KeyCaptureDialog.get_key_sequence(dlg)
+            if ok:
+                table.item(row, 2).setText(new_seq)
+
+        table.cellDoubleClicked.connect(_edit_shortcut)
+
+        btn_save = QPushButton("儲存", dlg)
+
+        def _save_shortcuts():
+            for r in range(table.rowCount()):
+                scope = table.item(r, 0).text()
+                key = table.item(r, 1).text()
+                seqs = table.item(r, 2).text().split(", ")
+                self._map[scope][key] = [s.strip() for s in seqs if s.strip()]
+            self.save()
+            # Re-register the main shortcuts
+            self.register_main(win, actions)
+            dlg.accept()
+
+        btn_save.clicked.connect(_save_shortcuts)
+
+        btn_close = QPushButton("關閉", dlg)
+        btn_close.clicked.connect(dlg.accept)
 
         lay = QVBoxLayout(dlg)
         lay.addWidget(table)
-        lay.addWidget(btn)
+        hlay = QHBoxLayout()
+        hlay.addStretch(1)
+        hlay.addWidget(btn_save)
+        hlay.addWidget(btn_close)
+        lay.addLayout(hlay)
+
         dlg.resize(520, 360)
         dlg.exec()
+
+
+class KeyCaptureDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("捕獲快捷鍵")
+        self.layout = QVBoxLayout(self)
+        self.label = QLabel("請按下您想設定的快捷鍵組合...")
+        self.layout.addWidget(self.label)
+        self.key_sequence = ""
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        modifiers = event.modifiers()
+
+        if modifiers & Qt.ControlModifier:
+            self.key_sequence += "Ctrl+"
+        if modifiers & Qt.AltModifier:
+            self.key_sequence += "Alt+"
+        if modifiers & Qt.ShiftModifier:
+            self.key_sequence += "Shift+"
+
+        if key in range(Qt.Key_F1, Qt.Key_F12 + 1):
+            self.key_sequence += f"F{key - Qt.Key_F1 + 1}"
+        elif key == Qt.Key_Space:
+            self.key_sequence += "Space"
+        else:
+            self.key_sequence += QKeySequence(key).toString()
+
+        QTimer.singleShot(0, self.accept)
+
+    @staticmethod
+    def get_key_sequence(parent):
+        dialog = KeyCaptureDialog(parent)
+        result = dialog.exec()
+        if result == QDialog.Accepted:
+            return dialog.key_sequence, True
+        return "", False
 
 
 def get_app_shortcut_manager() -> ShortcutManager:

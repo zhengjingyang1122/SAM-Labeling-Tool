@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
         def _show_keys():
             try:
                 mgr = get_app_shortcut_manager()
-                mgr.show_shortcuts_dialog(self)
+                mgr.show_shortcuts_dialog(self, self, self.ui_actions)
             except Exception as e:
                 QMessageBox.information(self, "快捷鍵", f"顯示快捷鍵失敗: {e}")
 

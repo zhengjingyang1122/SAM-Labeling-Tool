@@ -40,11 +40,31 @@ class OnboardingWizard(QWizard):
 
         # Page 4: 小技巧
         p4 = QWizardPage()
-        p4.setTitle("小技巧與說明")
+        p4.setTitle("媒體檔案總管")
         lay4 = QVBoxLayout(p4)
         lay4.addWidget(
             QLabel(
-                "• 左側『媒體檔案』可瀏覽與管理輸出.\n• 狀態列會顯示進度與即時提示.\n• 任何時候可從『說明 > 快速導覽』再看一次."
+                "• 點擊左下角『顯示媒體檔案』可以打開總管.\n• 在總管中可以瀏覽、預覽、刪除拍攝的照片和影片.\n• 也可以對單張影像作分割."
+            )
+        )
+
+        # Page 5: 快捷鍵
+        p5 = QWizardPage()
+        p5.setTitle("快捷鍵")
+        lay5 = QVBoxLayout(p5)
+        lay5.addWidget(
+            QLabel(
+                "• 常用的功能都有對應的快捷鍵, 例如 Space 是拍照, R 是錄影.\n• 完整的快捷鍵列表可以從『說明 > 鍵盤快捷鍵』打開.\n• 在快捷鍵設定中, 你可以即時更換你習慣的熱鍵."
+            )
+        )
+
+        # Page 6: 小技巧
+        p6 = QWizardPage()
+        p6.setTitle("小技巧與說明")
+        lay6 = QVBoxLayout(p6)
+        lay6.addWidget(
+            QLabel(
+                "• 狀態列會顯示進度與即時提示.\n• 任何時候可從『說明 > 快速導覽』再看一次."
             )
         )
 
@@ -52,3 +72,5 @@ class OnboardingWizard(QWizard):
         self.addPage(p2)
         self.addPage(p3)
         self.addPage(p4)
+        self.addPage(p5)
+        self.addPage(p6)
