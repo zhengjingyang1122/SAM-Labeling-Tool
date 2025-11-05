@@ -1,4 +1,4 @@
-# utils.py
+# utils/utils.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -34,20 +34,15 @@ def ensure_dir(p: PathLike) -> Path:
     pth.mkdir(parents=True, exist_ok=True)
     return pth
 
-
 def ts() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-
-def ts_ms() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-
+# Removed unused ts_ms() function to simplify the utilities module.
 
 def build_snapshot_path(save_dir: PathLike) -> Path:
     """使用 PathManager 建立單張照片的路徑"""
     pm = get_path_manager(save_dir, timestamp=ts())
     return pm.get_photo_path()
-
 
 def build_burst_path(save_dir: PathLike, series_id: str, index: int) -> Path:
     """使用 PathManager 建立連拍照片的路徑"""
@@ -55,12 +50,10 @@ def build_burst_path(save_dir: PathLike, series_id: str, index: int) -> Path:
     pm = get_path_manager(save_dir, timestamp=series_id)
     return pm.get_burst_path(index)
 
-
 def build_record_path(save_dir: PathLike) -> Path:
     """使用 PathManager 建立影片的路徑"""
     pm = get_path_manager(save_dir, timestamp=ts())
     return pm.get_video_path()
-
 
 def to_qurl_or_str(path: Path) -> object:
     if QUrl is not None:

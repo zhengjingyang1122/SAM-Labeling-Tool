@@ -1,4 +1,4 @@
-# modules/ui_main.py
+# modules/presentation/qt/ui_main.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -101,7 +101,7 @@ def build_ui(win):
     rec_layout.addWidget(win.btn_rec_stop)
     rec_box.setLayout(rec_layout)
 
-    # 右側
+    # 右側面板
     right_panel = QVBoxLayout()
     right_panel.addWidget(dir_box)
     right_panel.addWidget(cam_sel_box)
@@ -109,10 +109,26 @@ def build_ui(win):
     right_panel.addWidget(photo_box)
     right_panel.addWidget(burst_box)
     right_panel.addWidget(rec_box)
-    win.chk_preload_sam = QCheckBox("預先載入 SAM 模型")
-    right_panel.addWidget(win.chk_preload_sam)
+    # 分割工具區：運行方式、模型與自動分割按鈕同層顯示
     seg_box = QGroupBox("分割工具")
     seg_layout = QHBoxLayout()
+    # 運行方式 (GPU / CPU)
+    seg_layout.addWidget(QLabel("運行方式:"))
+    win.sam_device_combo = QComboBox()
+    win.sam_device_combo.addItems(["GPU", "CPU"])
+    win.sam_device_combo.setCurrentIndex(0)
+    win.sam_device_combo.setToolTip("選擇運行方式 (GPU 或 CPU)")
+    seg_layout.addWidget(win.sam_device_combo)
+    # 模型大小 (H/L/B)
+    seg_layout.addWidget(QLabel("模型:"))
+    win.sam_model_combo = QComboBox()
+    win.sam_model_combo.addItem("H", userData="vit_h")
+    win.sam_model_combo.addItem("L", userData="vit_l")
+    win.sam_model_combo.addItem("B", userData="vit_b")
+    win.sam_model_combo.setCurrentIndex(0)
+    win.sam_model_combo.setToolTip("選擇模型大小 (H/L/B)")
+    seg_layout.addWidget(win.sam_model_combo)
+    # 自動分割按鈕
     win.btn_auto_seg_image = QPushButton("自動分割")
     seg_layout.addWidget(win.btn_auto_seg_image)
     seg_box.setLayout(seg_layout)
@@ -133,7 +149,7 @@ def build_ui(win):
     root.addWidget(win.video_widget)
     central.setLayout(root)
 
-    # 在建立完各元件後加入 ToolTip
+    # ToolTips
     win.btn_start_cam.setToolTip("啟動相機並顯示預覽")
     win.btn_stop_cam.setToolTip("停止相機")
     win.btn_capture.setToolTip("立即拍一張快照 Space")
@@ -145,33 +161,10 @@ def build_ui(win):
     win.btn_rec_pause.setToolTip("暫停錄影")
     win.btn_rec_stop.setToolTip("停止並儲存錄影 Shift+R")
     win.btn_auto_seg_image.setToolTip("對影像執行自動分割")
+    # 已移除預載入 SAM 模型的復選框，因此不再設定其 tooltip。
+    win.sam_device_combo.setToolTip("選擇用於 SAM 模型推論的設備")
 
     # 輕微調整版面間距
-    right_panel.setSpacing(8)
-    root = win.centralWidget().layout()
-    root.setSpacing(12)
-
-    # ToolTips
-    win.dir_edit.setToolTip("輸出影像與影片的儲存路徑")
-    win.btn_browse.setToolTip("選擇輸出資料夾")
-    win.cam_combo.setToolTip("選擇要使用的相機裝置")
-    win.btn_refresh_cam.setToolTip("重新掃描相機裝置")
-    win.btn_start_cam.setToolTip("啟動相機預覽")
-    win.btn_stop_cam.setToolTip("停止相機預覽")
-    win.btn_capture.setToolTip("拍一張快照 Space")
-    win.burst_count.setToolTip("連拍張數")
-    win.burst_interval.setToolTip("每張間隔 毫秒")
-    win.btn_start_burst.setToolTip("開始連拍")
-    win.btn_stop_burst.setToolTip("停止連拍")
-    win.btn_rec_resume.setToolTip("開始或繼續錄影 R")
-    win.btn_rec_pause.setToolTip("暫停錄影")
-    win.btn_rec_stop.setToolTip("停止錄影 Shift+R")
-    win.chk_preload_sam.setToolTip("預先載入 SAM 權重以加速第一次分割")
-    win.btn_auto_seg_image.setToolTip(
-        "自動分割：可選單一影像或整個資料夾；已建立 embedding 的影像將略過重新分割"
-    )
-
-    # 微調間距
     right_panel.setSpacing(8)
     root = win.centralWidget().layout()
     root.setSpacing(12)
@@ -190,5 +183,4 @@ def wire_ui(win, actions):
     win.btn_rec_pause.clicked.connect(actions.pause_recording)
     win.btn_rec_stop.clicked.connect(actions.stop_recording)
     win.btn_auto_seg_image.clicked.connect(actions.open_auto_segment_menu)
-
-    win.chk_preload_sam.toggled.connect(actions.toggle_preload_sam)
+    # 預先載入 SAM 的復選框已移除，不再連接該事件。

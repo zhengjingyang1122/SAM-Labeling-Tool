@@ -40,8 +40,19 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_SAM_MODEL_TYPE = "vit_h"
+# Default checkpoint path.  The repository now stores SAM weights under
+# a single ``model`` directory rather than ``models``.  The H‑size model
+# (vit_h) uses the 4b8939 checkpoint name.  See ``MODEL_FILE_NAMES``
+# below for mapping of other model types to filenames.
 DEFAULT_SAM_CKPT = Path("./models/sam_vit_h_4b8939.pth")
 DEFAULT_SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
+
+# Mapping of supported SAM model types to their expected filename under ``./model``
+MODEL_FILE_NAMES = {
+    "vit_h": "sam_vit_h_4b8939.pth",
+    "vit_l": "sam_vit_l_0b3195.pth",
+    "vit_b": "sam_vit_b_01ec64.pth",
+}
 
 
 class SegmentationController:
@@ -87,6 +98,18 @@ class SegmentationController:
         except Exception:
             pass
 
+        # 連接 UI 下拉選單以便在使用者切換模型或運算方式時卸載當前模型。
+        try:
+            # 監聽模型大小改變
+            if hasattr(self.w, "sam_model_combo") and hasattr(self.w.sam_model_combo, "currentIndexChanged"):
+                self.w.sam_model_combo.currentIndexChanged.connect(self._on_sam_settings_changed)
+            # 監聽運行方式改變
+            if hasattr(self.w, "sam_device_combo") and hasattr(self.w.sam_device_combo, "currentIndexChanged"):
+                self.w.sam_device_combo.currentIndexChanged.connect(self._on_sam_settings_changed)
+        except Exception:
+            # 如果連接失敗（例如在非 Qt 環境），忽略
+            pass
+
     # ------------------------------------------------------------------
     # Model loading and unloading
     # ------------------------------------------------------------------
@@ -110,33 +133,86 @@ class SegmentationController:
             )
             return False
 
+        # 先根據介面決定模型類型
+        model_type = DEFAULT_SAM_MODEL_TYPE
+        try:
+            if hasattr(self.w, "sam_model_combo"):
+                data = self.w.sam_model_combo.currentData()
+                if isinstance(data, str) and data:
+                    model_type = data
+        except Exception:
+            pass
+
         ckpt: Optional[Path] = self._last_ckpt
-        # Try default path first
+        # 對應模型類型至預設檔名，優先從已載入記憶的 ckpt 讀取
         if ckpt is None or not Path(ckpt).exists():
-            default = DEFAULT_SAM_CKPT
-            if default.exists():
-                ckpt = default
-            else:
-                try:
-                    maybe = self._download_sam_with_prompt()
-                    if maybe is not None:
-                        ckpt = maybe
-                except Exception as e:
-                    logger.exception("下載 SAM 權重失敗")
-                    QMessageBox.critical(self.w, "下載 SAM 權重失敗", str(e))
+            # 根據當前選擇的模型類型決定預設檔案名稱
+            fname = MODEL_FILE_NAMES.get(model_type)
+            if fname:
+                candidate = Path("./models") / fname
+                if candidate.exists():
+                    ckpt = candidate
+                else:
+                    # 對 vit_h 模型允許下載預設權重；其餘類型則需手動選擇
+                    if model_type == DEFAULT_SAM_MODEL_TYPE:
+                        try:
+                            maybe = self._download_sam_with_prompt()
+                            if maybe is not None:
+                                ckpt = maybe
+                        except Exception as e:
+                            logger.exception("下載 SAM 權重失敗")
+                            QMessageBox.critical(self.w, "下載 SAM 權重失敗", str(e))
+                    else:
+                        ckpt = None
 
         # As a last resort ask the user to pick a .pth file
         if ckpt is None or not Path(ckpt).exists():
+            # 未找到對應權重時，讓使用者選擇檔案
             f, _ = QFileDialog.getOpenFileName(
-                self.w, "選擇 SAM 權重檔 .pth", str(Path.home()), "SAM Checkpoint (*.pth *.pt)"
+                self.w,
+                "選擇 SAM 權重檔 .pth",
+                str(Path.home()),
+                "SAM Checkpoint (*.pth *.pt)",
             )
             if not f:
                 return False
-            ckpt = Path(f)
+            chosen = Path(f)
+            # 檢查所選檔案名稱是否含有對應模型類型的識別字串，避免載入錯誤權重
+            expected_tag = f"sam_{model_type}"
+            if expected_tag not in chosen.name:
+                QMessageBox.warning(
+                    self.w,
+                    "權重不符",
+                    f"所選檔案與模型大小 {model_type} 不匹配，請選擇對應的權重檔 (包含 {expected_tag})。",
+                )
+                return False
+            ckpt = chosen
 
         try:
+            # 讀取使用者所選模型類型；若無則使用預設
             model_type = DEFAULT_SAM_MODEL_TYPE
-            self.sam = sam_engine_mod.SamEngine(Path(ckpt), model_type=model_type)
+            try:
+                if hasattr(self.w, "sam_model_combo"):
+                    # 使用 userData 儲存的模型代號，如 vit_h、vit_l、vit_b
+                    data = self.w.sam_model_combo.currentData()
+                    if isinstance(data, str) and data:
+                        model_type = data
+            except Exception:
+                pass
+
+            # 取得使用者所選的運算裝置 (GPU or CPU)；如未提供則預設由 SamEngine 判斷
+            device = None
+            try:
+                if hasattr(self.w, "sam_device_combo"):
+                    text = self.w.sam_device_combo.currentText().strip().lower()
+                    if text == "gpu":
+                        device = "cuda"
+                    elif text == "cpu":
+                        device = "cpu"
+            except Exception:
+                pass
+            # 建立 SamEngine，傳入指定的 model_type 與 device
+            self.sam = sam_engine_mod.SamEngine(Path(ckpt), model_type=model_type, device=device)
             # Show a simulated loading animation via the status footer.
             # Use start_scifi_simulated to provide the start/stop range parameters.
             self.w.status.start_scifi_simulated(
@@ -176,6 +252,38 @@ class SegmentationController:
             except Exception as e:
                 self.w.status.stop_scifi("狀態：模型卸載失敗")
                 QMessageBox.warning(self.w, "卸載警告", str(e))
+
+    def _on_sam_settings_changed(self) -> None:
+        """Respond to changes in the SAM settings (model size or device).
+
+        When the user chooses a different model or device, unload the
+        currently loaded SAM engine (if any) to free resources.  A
+        subsequent segmentation request will lazily reload the model
+        using the new settings.
+        """
+        # 如果尚未載入則無需處理
+        if not self._resolve_callable(self.sam, ["auto_masks_from_image"]):
+            return
+        try:
+            # 卸載當前模型
+            if self._resolve_callable(self.sam, ["unload"]):
+                self.w.status.start_scifi("卸載 SAM 模型中...")
+                try:
+                    self.sam.unload()
+                finally:
+                    self.w.status.stop_scifi("狀態：模型已卸載")
+            else:
+                self.w.status.message("狀態：模型已卸載")
+        except Exception as e:
+            # 若卸載失敗，仍清空 sam 並顯示警告
+            try:
+                self.w.status.stop_scifi("狀態：模型卸載失敗")
+            except Exception:
+                pass
+            QMessageBox.warning(self.w, "卸載警告", str(e))
+        # 清除引用與之前保存的 ckpt，下一次需要時再載入
+        self.sam = None
+        self._last_ckpt = None
 
     # ------------------------------------------------------------------
     # Segmentation menu actions

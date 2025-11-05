@@ -1,4 +1,4 @@
-# modules/sam_engine.py
+# modules/infrastructure/vision/sam_engine.py
 import logging
 from pathlib import Path
 from typing import Optional
@@ -6,24 +6,48 @@ from typing import Optional
 import cv2
 import numpy as np
 import torch
+
 from .segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
 
 logger = logging.getLogger(__name__)
 
 
 class SamEngine:
-    def __init__(self, ckpt: Path, model_type="vit_h", device=None):
+    """A thin wrapper around the Segment Anything model.
+
+    This class provides methods to generate masks for images and the first frame
+    of videos. It lazily loads the underlying SAM model on first use and
+    supports optional caching of masks and embeddings to speed up subsequent
+    operations. The engine can also unload the model to release GPU memory.
+    """
+
+    def __init__(self, ckpt: Path, model_type: str = "vit_h", device: Optional[str] = None):
         self.ckpt = Path(ckpt)
         self.model_type = model_type
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._sam = None
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         if self._sam is None:
             self._sam = sam_model_registry[self.model_type](checkpoint=str(self.ckpt))
             self._sam.to(self.device)
 
-    def auto_masks_from_image(self, img_path: Path, points_per_side=32, pred_iou_thresh=0.88):
+    def auto_masks_from_image(self, img_path: Path, points_per_side: int = 32, pred_iou_thresh: float = 0.88):
+        """Generate masks for a single image.
+
+        Parameters
+        ----------
+        img_path : Path
+            Path to the image file.
+        points_per_side : int, optional
+            The number of points per side to sample when generating masks (default 32).
+        pred_iou_thresh : float, optional
+            The IOU threshold for predicted masks (default 0.88).
+
+        Returns
+        -------
+        Tuple of (bgr image array, list of masks, list of scores)
+        """
         self._ensure_loaded()
         img_path = Path(img_path)
         bgr = self._read_image_bgr(img_path)
@@ -39,6 +63,7 @@ class SamEngine:
         return bgr, masks, scores
 
     def auto_masks_from_video_first_frame(self, video_path: Path, **amg_kwargs):
+        """Generate masks for the first frame of a video."""
         cap = cv2.VideoCapture(str(video_path))
         ok, frame = cap.read()
         cap.release()
@@ -52,12 +77,16 @@ class SamEngine:
         finally:
             tmp.unlink(missing_ok=True)
 
-    def load(self):
+    def load(self) -> None:
+        """Explicitly load the SAM model into memory."""
         self._ensure_loaded()
 
-    def unload(self):
-        # 釋放 GPU 記憶體
-        self._pred = None
+    def unload(self) -> None:
+        """Release the loaded SAM model and free GPU memory.
+
+        Note that the `_pred` attribute was removed because it was never defined.
+        """
+        # 清除已載入的模型，釋放 GPU 記憶體。移除未使用的 _pred 屬性。
         self._sam = None
         try:
             if torch.cuda.is_available():
@@ -71,11 +100,17 @@ class SamEngine:
     def auto_masks_from_image_cached(
         self,
         img_path: Path,
-        points_per_side=32,
-        pred_iou_thresh=0.88,
+        points_per_side: int = 32,
+        pred_iou_thresh: float = 0.88,
         embedding_path: Optional[Path] = None,
         masks_path: Optional[Path] = None,
     ):
+        """Generate masks for an image with caching.
+
+        If a cache file exists, it will be used; otherwise masks and scores
+        are computed and written to a compressed NPZ file. The image
+        embedding is also stored if possible for accelerated interaction.
+        """
         self._ensure_loaded()
         img_path = Path(img_path)
         mask_p = masks_path or img_path.with_suffix(img_path.suffix + ".sam_masks.npz")

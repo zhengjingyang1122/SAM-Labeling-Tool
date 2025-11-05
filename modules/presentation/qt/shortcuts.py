@@ -1,4 +1,4 @@
-# modules/shortcuts.py
+# modules/presentation/qt/shortcuts.py
 from __future__ import annotations
 
 import json
@@ -92,12 +92,17 @@ class ShortcutManager:
         return act
 
     def clear_actions(self, widget: QWidget) -> None:
+        # 移除所有先前註冊的 QAction。若 QAction 已被 Qt 刪除則忽略例外。
         for act in self._created_actions:
-            widget.removeAction(act)
+            try:
+                widget.removeAction(act)
+            except RuntimeError:
+                # QAction 已經被刪除，不需要再移除
+                pass
         self._created_actions.clear()
 
     def register_main(self, win: QWidget, actions) -> None:
-        self.clear_actions(win) # Clear existing actions before re-registering
+        self.clear_actions(win)  # Clear existing actions before re-registering
         mapping: Dict[Tuple[str, str], Union[QAction, Callable[[], None]]] = {
             ("main", "capture.photo"): actions.capture_image,
             ("main", "record.start_resume"): actions.resume_recording,
@@ -109,7 +114,7 @@ class ShortcutManager:
                 self.bind(win, seqs, tgt)
 
     def register_viewer(self, viewer) -> None:
-        self.clear_actions(viewer) # Clear existing actions before re-registering
+        self.clear_actions(viewer)  # Clear existing actions before re-registering
         mapping: Dict[Tuple[str, str], Union[QAction, Callable[[], None]]] = {
             ("viewer", "nav.prev"): viewer._prev_image,
             ("viewer", "nav.next"): viewer._next_image,
@@ -140,7 +145,7 @@ class ShortcutManager:
         table.resizeColumnsToContents()
 
         def _edit_shortcut(row, column):
-            if column != 2: # Only edit the 'Keys' column
+            if column != 2:  # Only edit the 'Keys' column
                 return
 
             scope = table.item(row, 0).text()
