@@ -1,571 +1,179 @@
-# modules/actions.py
+"""
+High cohesion, low coupling `Actions` class.
+
+This module defines an ``Actions`` class that acts as a thin façade
+between the Qt user interface and the underlying domain controllers.
+The intent is to minimise the amount of business logic contained
+directly within the GUI layer by delegating responsibilities to
+specialised controllers.  In particular, camera‑related behaviours
+are delegated to ``CameraController`` and segmentation behaviours to
+``SegmentationController``.  This results in a more cohesive and
+testable codebase where each controller is responsible for a single
+concern.
+
+Prior to this refactor the ``Actions`` class contained hundreds of
+lines of mixed logic for camera control, segmentation model
+management, file I/O and Qt interactions.  By extracting those
+concerns into the controllers we reduce coupling between the GUI and
+the infrastructure and make it easier to evolve each feature in
+isolation.
+"""
+
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Callable, List, Optional
-from urllib.request import urlretrieve
+from typing import List, Optional
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox
+from PySide6.QtWidgets import QFileDialog
 
-from modules.presentation.qt.segmentation.segmentation_viewer import SegmentationViewer
-from modules.presentation.qt.ui_state import update_ui_state
-from utils.utils import clear_current_path_manager
-
-try:
-    from ..infrastructure.vision import sam_engine as sam_engine_mod
-except ImportError:
-    sam_engine_mod = None
-
-DEFAULT_SAM_MODEL_TYPE = "vit_h"
-DEFAULT_SAM_CKPT = Path("./models/sam_vit_h_4b8939.pth")
-DEFAULT_SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
+from .camera_controller import CameraController
+from .segmentation_controller import SegmentationController
 
 logger = logging.getLogger(__name__)
 
 
-def _ensure_dir(p: Path) -> None:
-    p.mkdir(parents=True, exist_ok=True)
-
-
-def _resolve_callable(obj: object, names: List[str]) -> Optional[Callable]:
-    if obj is None:
-        return None
-    for name in names:
-        fn = getattr(obj, name, None)
-        if callable(fn):
-            return fn
-    return None
-
-
 class Actions:
-    """主視窗所有槽函式 / 操作邏輯"""
+    """Facade for user actions in the main window.
+
+    The ``Actions`` class wires up UI events to the appropriate
+    controllers.  It exposes a subset of methods that match the
+    original ``Actions`` API so that existing UI bindings (such as
+    button click callbacks) continue to work.  Internally it holds
+    instances of ``CameraController`` and ``SegmentationController``
+    which implement the actual behaviour.
+
+    Parameters
+    ----------
+    win : object
+        The main window providing access to UI controls such as
+        combo boxes, text edits and status footers.
+    cam : object
+        The camera manager used by ``CameraController``.  This is
+        typically an instance of ``CameraManager``.
+    explorer_ctrl : object, optional
+        An optional explorer controller used by ``SegmentationController``
+        to obtain the last image or video path and to bind right‑click
+        context menus.
+    sam_engine_instance : object, optional
+        Optionally provide a pre‑instantiated ``SamEngine`` to the
+        segmentation controller.  If omitted the segmentation
+        controller will lazily instantiate one when needed.
+    """
 
     def __init__(
         self,
-        win,
-        cam,
+        win: object,
+        cam: object,
         explorer_ctrl: Optional[object] = None,
         sam_engine_instance: Optional[object] = None,
-    ):
+    ) -> None:
         self.w = win
-        self.cam = cam
-        self.explorer = explorer_ctrl
-        self.sam = sam_engine_instance
-        self._last_ckpt: Optional[Path] = None
+        # Initialise domain controllers
+        self.camera_controller = CameraController(win, cam)
+        self.segmentation_controller = SegmentationController(
+            win, explorer_ctrl, sam_engine_instance
+        )
 
-        try:
-            dock = getattr(self.explorer, "explorer", None)
-            if dock is not None and hasattr(dock, "files_segment_requested"):
-                dock.files_segment_requested.connect(self.open_segmentation_for_file_list)
-        except Exception:
-            pass
-        self.default_params = {
-            "points_per_side": 32,
-            "pred_iou_thresh": 0.88,
-            "union_morph_enabled": True,
-            "union_morph_scale": 0.003,
-            "fit_on_open": True,
-        }
-
-    def _on_output_dir_changed(self, path: str) -> None:
-        pass
-
-    def select_camera_by_name(self, name: str) -> None:
-        try:
-            cb = self.w.cam_combo
-            for i in range(cb.count()):
-                if cb.itemText(i) == name:
-                    cb.setCurrentIndex(i)
-                    break
-        except Exception:
-            pass
-
-    def choose_dir(self):
+    # ------------------------------------------------------------------
+    # Directory selection
+    # ------------------------------------------------------------------
+    def choose_dir(self) -> None:
+        """Open a file dialog allowing the user to choose an output directory."""
         d = QFileDialog.getExistingDirectory(self.w, "選擇輸出資料夾", str(self.w.dir_edit.text()))
         if d:
             self.w.dir_edit.setText(d)
 
-    def populate_camera_devices(self):
-        """把各種 list_devices() 回傳格式轉成 QComboBox 可接受的 (text, userData)。"""
-        try:
-            self.w.cam_combo.clear()
-            try:
-                devices = list(self.cam.list_devices())
-            except Exception:
-                devices = []
-            for item in devices:
-                text = None
-                userData = None
-                if isinstance(item, (tuple, list)):
-                    str_elems = [x for x in item if isinstance(x, str)]
-                    int_elems = [x for x in item if isinstance(x, int)]
-                    if str_elems:
-                        text = str_elems[0]
-                        userData = int_elems[0] if int_elems else tuple(item)
-                    else:
-                        text = " / ".join(str(x) for x in item)
-                        userData = tuple(item)
-                elif isinstance(item, dict):
-                    text = str(
-                        item.get("name")
-                        or item.get("label")
-                        or item.get("path")
-                        or item.get("id")
-                        or "device"
-                    )
-                    userData = item.get("id", item.get("index", item))
-                else:
-                    text = str(item)
-                    userData = item
-                self.w.cam_combo.addItem(text, userData)
-            if self.w.cam_combo.count() > 0:
-                self.w.cam_combo.setCurrentIndex(0)
-        except Exception as e:
-            QMessageBox.critical(self.w, "讀取裝置失敗", str(e))
+    # ------------------------------------------------------------------
+    # Camera operations delegate to the controller
+    # ------------------------------------------------------------------
+    def select_camera_by_name(self, name: str) -> None:
+        self.camera_controller.select_camera_by_name(name)
 
-    def start_camera(self):
-        try:
-            data = self.w.cam_combo.currentData()
-            idx = data if isinstance(data, int) else self.w.cam_combo.currentIndex()
-            try:
-                self.cam.set_selected_device_index(idx)
-            except Exception:
-                pass
+    def populate_camera_devices(self) -> None:
+        self.camera_controller.populate_camera_devices()
 
-            # 再啟動相機與預覽
-            self.cam.start(self.w.video_widget)
-            self.w.status.message("狀態: 相機啟動")
-            update_ui_state(self.w)
-        except Exception as e:
-            QMessageBox.critical(self.w, "相機啟動失敗", str(e))
+    def start_camera(self) -> None:
+        self.camera_controller.start_camera()
 
-    def stop_camera(self):
-        try:
-            self.cam.stop()
-            self.w.video_widget.setStyleSheet("background-color: black;")
-            self.w.video_widget.update()
-            self.w.status.message("狀態：相機停止")
-            update_ui_state(self.w)
-        except Exception as e:
-            QMessageBox.critical(self.w, "相機停止失敗", str(e))
+    def stop_camera(self) -> None:
+        self.camera_controller.stop_camera()
 
-    def capture_image(self):
-        clear_current_path_manager()
-        out_dir = Path(self.w.dir_edit.text())
-        if getattr(self.cam, "photo", None) is None:
-            QMessageBox.warning(self.w, "無法拍照", "相機尚未啟動或不支援拍照")
-            return
-        try:
-            self.cam.photo.capture_single(out_dir)
-            self.w.status.message("狀態：已拍照")
-        except Exception as e:
-            logger.exception("拍照失敗")
-            QMessageBox.critical(self.w, "拍照失敗", str(e))
+    def capture_image(self) -> None:
+        self.camera_controller.capture_image()
 
-    def start_burst(self):
-        if getattr(self.cam, "burst", None) is None:
-            QMessageBox.warning(self.w, "無法連拍", "相機尚未啟動或不支援連拍")
-            return
-        clear_current_path_manager()
-        out_dir = Path(self.w.dir_edit.text())
-        count = int(self.w.burst_count.value())
-        interval = int(self.w.burst_interval.value())
-        self.cam.burst.start(count, interval, out_dir)
-        self.w.burst_ctrl = self.cam.burst
-        update_ui_state(self.w)
+    def start_burst(self) -> None:
+        self.camera_controller.start_burst()
 
-    def stop_burst(self):
-        if getattr(self.cam, "burst", None):
-            self.cam.burst.stop()
-        self.w.burst_ctrl = None
-        update_ui_state(self.w)
+    def stop_burst(self) -> None:
+        self.camera_controller.stop_burst()
 
-    def resume_recording(self):
-        clear_current_path_manager()
-        out_dir = Path(self.w.dir_edit.text())
-        if getattr(self.cam, "rec", None) is None:
-            logger.warning("錄影控制器不存在或相機未啟動")
-            QMessageBox.warning(self.w, "無法錄影", "相機尚未啟動或不支援錄影")
-            return
-        self.cam.rec.start_or_resume(out_dir)
-        self.w.rec_ctrl = self.cam.rec
-        self.w.status.message("狀態：錄影中")
+    def resume_recording(self) -> None:
+        self.camera_controller.resume_recording()
 
-    def pause_recording(self):
-        if getattr(self.w, "rec_ctrl", None) is None:
-            return
-        try:
-            self.w.rec_ctrl.pause()
-            self.w.status.message("狀態：錄影暫停")
-        except Exception as e:
-            QMessageBox.critical(self.w, "暫停錄影錯誤", str(e))
+    def pause_recording(self) -> None:
+        self.camera_controller.pause_recording()
 
-    def stop_recording(self):
-        if getattr(self.w, "rec_ctrl", None) is None:
-            return
-        try:
-            self.w.rec_ctrl.stop()
-            self.w.status.message("狀態：錄影停止")
-        except Exception as e:
-            logger.exception("停止錄影錯誤")
-            QMessageBox.critical(self.w, "停止錄影錯誤", str(e))
+    def stop_recording(self) -> None:
+        self.camera_controller.stop_recording()
 
-    def _ensure_sam_loaded_interactive(self) -> bool:
-        """若 self.sam 未就緒，優先使用預設 ckpt；無檔時詢問下載，同意後才下載並載入；最後才回退檔案選取。"""
+    # ------------------------------------------------------------------
+    # Segmentation operations delegate to the controller
+    # ------------------------------------------------------------------
+    def toggle_preload_sam(self, checked: bool) -> None:
+        self.segmentation_controller.toggle_preload_sam(checked)
 
-        if _resolve_callable(self.sam, ["auto_masks_from_image"]):
-            return True
-        if sam_engine_mod is None or not hasattr(sam_engine_mod, "SamEngine"):
-            QMessageBox.warning(
-                self.w, "無法載入", "找不到 SamEngine 類別，請確認 modules/infrastructure/vision/sam_engine.py"
-            )
-            return False
+    def open_auto_segment_menu(self) -> None:
+        self.segmentation_controller.open_auto_segment_menu()
 
-        ckpt: Optional[Path] = self._last_ckpt
+    def open_segmentation_view_for_chosen_image(self) -> None:
+        self.segmentation_controller.open_segmentation_view_for_chosen_image()
 
-        if ckpt is None or not Path(ckpt).exists():
-            default = DEFAULT_SAM_CKPT
-            if default.exists():
-                ckpt = default
-            else:
-                try:
-                    maybe = self._download_sam_with_prompt()
-                    if maybe is not None:
-                        ckpt = maybe
-                except Exception as e:
-                    logger.exception("下載 SAM 權重失敗")
-                    QMessageBox.critical(self.w, "下載 SAM 權重失敗", str(e))
+    def open_segmentation_view_for_folder_prompt(self) -> None:
+        self.segmentation_controller.open_segmentation_view_for_folder_prompt()
 
-        if ckpt is None or not Path(ckpt).exists():
-            f, _ = QFileDialog.getOpenFileName(
-                self.w, "選擇 SAM 權重檔 .pth", str(Path.home()), "SAM Checkpoint (*.pth *.pt)"
-            )
-            if not f:
-                return False
-            ckpt = Path(f)
+    def open_segmentation_view_for_last_photo(self) -> None:
+        self.segmentation_controller.open_segmentation_view_for_last_photo()
 
-        try:
-            model_type = DEFAULT_SAM_MODEL_TYPE
-            self.sam = sam_engine_mod.SamEngine(Path(ckpt), model_type=model_type)
-            self.w.status.start_scifi_simulated("載入 SAM 模型中...", start=25, stop_at=99)
-            self.sam.load()
-            self.w.status.stop_scifi("狀態：模型已載入")
-            self._last_ckpt = Path(ckpt)
-            return True
-        except Exception as e:
-            self.w.status.stop_scifi("狀態：模型載入失敗")
-            logger.exception("SAM 模型載入失敗")
-            QMessageBox.critical(self.w, "載入失敗", str(e))
-            self.sam = None
-            return False
+    def open_segmentation_view_for_video_file(self) -> None:
+        self.segmentation_controller.open_segmentation_view_for_video_file()
 
-    def toggle_preload_sam(self, checked: bool):
-        if checked:
-            ok = self._ensure_sam_loaded_interactive()
-            if not ok:
-                self.w.chk_preload_sam.blockSignals(True)
-                self.w.chk_preload_sam.setChecked(False)
-                self.w.chk_preload_sam.blockSignals(False)
-        else:
-            try:
-                if self.sam and _resolve_callable(self.sam, ["unload"]):
-                    self.w.status.start_scifi("卸載 SAM 模型中...")
-                    try:
-                        self.sam.unload()
-                    finally:
-                        self.w.status.stop_scifi("狀態：模型已卸載")
-                else:
-                    self.w.status.message("狀態：模型已卸載")
-                self.sam = None
-            except Exception as e:
-                self.w.status.stop_scifi("狀態：模型卸載失敗")
-                QMessageBox.warning(self.w, "卸載警告", str(e))
+    def open_segmentation_view_for_last_video(self) -> None:
+        self.segmentation_controller.open_segmentation_view_for_last_video()
 
-    def open_auto_segment_menu(self):
-        btn = getattr(self.w, "btn_auto_seg_image", None)
-        menu = QMenu(self.w)
+    def open_segmentation_for_file_list(self, file_list: List[Path]) -> None:
+        """Delegate segmentation of a file list from the explorer."""
+        self.segmentation_controller.open_segmentation_for_file_list(file_list)
 
-        act_single = QAction("自動分割：選擇單一影像...", self.w)
-        act_folder = QAction("自動分割：瀏覽資料夾（批次）...", self.w)
+    # ------------------------------------------------------------------
+    # Backwards compatibility stubs
+    # ------------------------------------------------------------------
+    def _on_output_dir_changed(self, path: str) -> None:
+        """
+        Placeholder for the original slot.
 
-        act_single.triggered.connect(self.open_segmentation_view_for_chosen_image)
-        act_folder.triggered.connect(self.open_segmentation_view_for_folder_prompt)
+        The legacy ``Actions`` implementation had a slot that reacted to
+        output directory changes.  In this refactored version the window
+        itself is responsible for handling edits to the directory text
+        field, so this method remains a no‑op to preserve compatibility
+        with any existing signal connections.
+        """
+        pass
 
-        menu.addAction(act_single)
-        menu.addAction(act_folder)
+    def _on_focus_updated(self, score: float, sharp: bool) -> None:
+        """
+        Forward focus quality updates to the status footer.
 
-        if btn is not None:
-            pos: QPoint = btn.mapToGlobal(btn.rect().bottomLeft())
-            menu.exec(pos)
-        else:
-            menu.exec(self.w.mapToGlobal(self.w.rect().center()))
-
-    def _collect_images_from_dir(self, pivot: Path) -> List[Path]:
-        exts = {".png", ".jpg", ".jpeg", ".bmp"}
-        return [
-            p for p in sorted(pivot.parent.glob("*")) if p.is_file() and p.suffix.lower() in exts
-        ]
-
-    @staticmethod
-    def _safe_resolve(p: Path) -> Path:
-        try:
-            return p.resolve()
-        except Exception:
-            return p
-
-    def _collect_images_with_pivot_first(self, pivot: Path) -> List[Path]:
-        """回傳同資料夾影像清單, 並將 pivot 排到第 1 筆"""
-        imgs = self._collect_images_from_dir(pivot) or []
-        pv = self._safe_resolve(pivot)
-        head = [p for p in imgs if self._safe_resolve(p) == pv]
-        tail = [p for p in imgs if self._safe_resolve(p) != pv]
-        return (head or [pivot]) + tail
-
-    def _ensure_sam_available(self, interactive: bool = True) -> bool:
-        """若還沒載入，interactive=True 會彈窗讓使用者選 ckpt 並載入。"""
-        if _resolve_callable(self.sam, ["auto_masks_from_image"]):
-            return True
-        if interactive:
-            return self._ensure_sam_loaded_interactive()
-        else:
-            QMessageBox.information(
-                self.w, "模型未載入", "請先在主視窗勾選『預先載入 SAM 模型』再使用自動分割。"
-            )
-            return False
-
-    def _make_compute_fn_for_image(self):
-        if not self._ensure_sam_available(interactive=True):
-            raise RuntimeError("已取消載入 SAM 模型")
-
-        from utils.utils import get_path_manager
-        from modules.infrastructure.io.path_manager import PathManager
-
-        fn_cached = getattr(self.sam, "auto_masks_from_image_cached", None)
-        if not callable(fn_cached):
-            raise RuntimeError("目前的 SamEngine 不支援 auto_masks_from_image_cached")
-
-        def compute_fn(img_path, points_per_side, pred_iou_thresh):
-            # 從影像路徑反推 timestamp 和 base_dir
-            try:
-                p = Path(img_path)
-                timestamp = p.parent.parent.name
-                base_dir = p.parent.parent.parent
-                pm = get_path_manager(base_dir, timestamp=timestamp)
-                source_name = pm.get_source_name(p)
-                embedding_path = pm.get_embedding_path(source_name)
-                masks_path = pm.get_masks_path(source_name)
-            except Exception:
-                # 如果路徑不符合預期結構，則退回舊版行為，不使用特定路徑
-                embedding_path = None
-                masks_path = None
-
-            return fn_cached(
-                img_path,
-                points_per_side=points_per_side,
-                pred_iou_thresh=pred_iou_thresh,
-                embedding_path=embedding_path,
-                masks_path=masks_path,
-            )
-
-        return compute_fn
-    def _make_compute_fn_for_video_first_frame(self, video_path: Path):
-        if not self._ensure_sam_available(interactive=True):
-            raise RuntimeError("已取消載入 SAM 模型")
-        fn = getattr(self.sam, "auto_masks_from_video_first_frame", None)
-        if not callable(fn):
-            raise RuntimeError("目前的 SamEngine 不支援 auto_masks_from_video_first_frame")
-        return lambda _img_path, points_per_side, pred_iou_thresh: fn(
-            video_path, points_per_side=points_per_side, pred_iou_thresh=pred_iou_thresh
-        )
-
-    def open_segmentation_view_for_chosen_image(self):
-        if not self._ensure_sam_available(interactive=True):
-            return
-        f, _ = QFileDialog.getOpenFileName(
-            self.w, "選擇影像", str(self.w.dir_edit.text()), "Images (*.png *.jpg *.jpeg *.bmp)"
-        )
-        if not f:
-            return
-        path = Path(f)
-        imgs = self._collect_images_with_pivot_first(path)
-        compute_masks_fn = self._make_compute_fn_for_image()
-        self._open_view(imgs, compute_masks_fn, title=f"自動分割檢視（{path.name}）")
-
-    def open_segmentation_view_for_folder_prompt(self):
-        if not self._ensure_sam_available(interactive=True):
-            return
-        d = QFileDialog.getExistingDirectory(self.w, "選擇資料夾", str(self.w.dir_edit.text()))
-        if not d:
-            return
-        folder = Path(d)
-        exts = {".png", ".jpg", ".jpeg", ".bmp"}
-        imgs = [p for p in sorted(folder.glob("*")) if p.is_file() and p.suffix.lower() in exts]
-        if not imgs:
-            QMessageBox.information(self.w, "沒有影像", "該資料夾內沒有支援格式的影像檔。")
-            return
-        compute_masks_fn = self._make_compute_fn_for_image()
-
-        try:
-            self.w.status.start_scifi("批次分割中：建立快取與 embedding")
-            for p in imgs:
-                try:
-                    pps = self.default_params["points_per_side"]
-                    iou = self.default_params["pred_iou_thresh"]
-                    self.sam.auto_masks_from_image_cached(
-                        p, points_per_side=pps, pred_iou_thresh=iou
-                    )
-                except Exception:
-                    logger.exception("批次建立快取時發生錯誤: %s", p)
-        finally:
-            self.w.status.stop_scifi()
-
-        self._open_view(imgs, compute_masks_fn, title=f"自動分割檢視（{folder.name}）")
-
-    def open_segmentation_view_for_last_photo(self):
-        if not self._ensure_sam_available(interactive=True):
-            return
-        last = None
-        if hasattr(self.explorer, "last_image_path"):
-            last = self.explorer.last_image_path()
-        if last is None or not Path(last).exists():
-            f, _ = QFileDialog.getOpenFileName(
-                self.w, "選擇影像", str(self.w.dir_edit.text()), "Images (*.png *.jpg *.jpeg *.bmp)"
-            )
-            if not f:
-                return
-            last = Path(f)
-        else:
-            last = Path(last)
-        imgs = self._collect_images_with_pivot_first(last)
-        compute_masks_fn = self._make_compute_fn_for_image()
-        self._open_view(imgs, compute_masks_fn, title="自動分割檢視（上次拍攝影像）")
-
-    def open_segmentation_view_for_video_file(self):
-        if not self._ensure_sam_available(interactive=True):
-            return
-        f, _ = QFileDialog.getOpenFileName(
-            self.w, "選擇影片", str(self.w.dir_edit.text()), "Videos (*.mp4 *.mov *.avi *.mkv)"
-        )
-        if not f:
-            return
-        video_path = Path(f)
-        compute_masks_fn = self._make_compute_fn_for_video_first_frame(video_path)
-        self._open_view(
-            [video_path], compute_masks_fn, title=f"影片第一幀分割檢視（{video_path.name}）"
-        )
-
-    def open_segmentation_view_for_last_video(self):
-        if not self._ensure_sam_available(interactive=True):
-            return
-        if hasattr(self.explorer, "last_video_path"):
-            vp = self.explorer.last_video_path()
-        else:
-            vp = None
-        if vp is None or not Path(vp).exists():
-            return self.open_segmentation_view_for_video_file()
-        compute_masks_fn = self._make_compute_fn_for_video_first_frame(Path(vp))
-        self._open_view(
-            [Path(vp)], compute_masks_fn, title=f"影片第一幀分割檢視（{Path(vp).name}）"
-        )
-
-    def _open_view(self, image_paths, compute_masks_fn, title: str):
-        if not hasattr(self, "_seg_windows"):
-            self._seg_windows = []
-        
-        from utils.utils import get_path_manager
-        base_dir = Path(self.w.dir_edit.text())
-        pm = None
-        try:
-            # 從第一個影像的路徑反推 path manager
-            p = Path(image_paths[0])
-            timestamp = p.parent.parent.name
-            pm = get_path_manager(base_dir, timestamp=timestamp)
-        except Exception:
-            # 如果路徑不符合預期，可能是一個外部檔案，不使用 pm
-            pass
-
-        params = {
-            "points_per_side": self.default_params["points_per_side"],
-            "pred_iou_thresh": self.default_params["pred_iou_thresh"],
-            "union_morph_enabled": self.default_params["union_morph_enabled"],
-            "union_morph_scale": self.default_params["union_morph_scale"],
-            "fit_on_open": self.default_params["fit_on_open"],
-        }
-
-        viewer = SegmentationViewer(
-            None,
-            image_paths,
-            compute_masks_fn,
-            params_defaults=params,
-            title=title,
-            path_manager=pm, # 注入 path_manager
-        )
-        viewer.setAttribute(Qt.WA_DeleteOnClose, True)
-        viewer.setWindowFlag(Qt.Window, True)
-
-        def _drop_ref(*_):
-            if viewer in self._seg_windows:
-                self._seg_windows.remove(viewer)
-
-        try:
-            viewer.destroyed.connect(_drop_ref)
-        except Exception:
-            pass
-
-        self._seg_windows.append(viewer)
-        viewer.show()
-        viewer.raise_()
-        viewer.activateWindow()
-
-    def _download_sam_with_prompt(self) -> Optional[Path]:
-        dst = DEFAULT_SAM_CKPT
-        if dst.exists():
-            return dst
-
-        ret = QMessageBox.question(
-            self.w,
-            "下載 SAM 權重",
-            "找不到預設 SAM 權重檔:\nmodels/sam_vit_h_4b8939.pth\n\n要立即下載並儲存到 models/ 嗎？\n檔案約 2.5GB，時間視網路速度而定。",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if ret != QMessageBox.Yes:
-            return None
-
-        try:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            self.w.status.start_scifi("下載 SAM 權重中...")
-
-            last_percent = -1
-
-            def hook(blocknum, blocksize, totalsize):
-                nonlocal last_percent
-                if totalsize > 0:
-                    percent = int(min(100, (blocknum * blocksize * 100) // totalsize))
-                    if percent != last_percent:
-                        last_percent = percent
-                        self.w.status.set_scifi_progress(percent, f"下載 SAM 權重中... {percent}%")
-
-            urlretrieve(DEFAULT_SAM_URL, str(dst), reporthook=hook)
-            self.w.status.stop_scifi("狀態：SAM 權重下載完成")
-            return dst
-        except Exception as e:
-            self.w.status.stop_scifi("狀態：SAM 權重下載失敗")
-            logger.exception("下載 SAM 權重失敗")
-            QMessageBox.critical(self.w, "下載失敗", str(e))
-            try:
-                if dst.exists():
-                    dst.unlink()
-            except Exception:
-                logger.warning("清理未完成 SAM 權重暫存檔失敗", exc_info=True)
-            return None
-
-    def _on_focus_updated(self, score: float, sharp: bool):
+        This method is retained for API compatibility with the previous
+        implementation of ``Actions``.  It forwards focus quality
+        updates to the status bar if the main window provides the
+        appropriate method.
+        """
         try:
             self.w.status.set_focus_quality(score, sharp)
         except Exception:
-            # 備援: 如果 set_focus_quality 失敗, 至少在主訊息區顯示
-            self.w.status.message_temp(f"{'清晰' if sharp else '模糊'} ({score:.0f})", 800)
+            # fallback: show a temporary message if the main method is missing
+            try:
+                self.w.status.message_temp(f"{'清晰' if sharp else '模糊'} ({score:.0f})", 800)
+            except Exception:
+                logger.warning("Focus update could not be displayed", exc_info=True)
