@@ -1,4 +1,4 @@
-# modules/camera_manager.py
+# modules/infrastructure/devices/camera_manager.py
 from __future__ import annotations
 
 import logging
@@ -23,20 +23,21 @@ from PySide6.QtMultimedia import (
     QMediaDevices,
     QMediaFormat,
     QMediaRecorder,
+    QVideoFrame,
 )
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
+from modules.app.config_manager import config
 from modules.infrastructure.io.burst import BurstShooter
 from modules.infrastructure.io.photo import PhotoCapture
 from modules.infrastructure.io.recorder import VideoRecorder
-
-from PySide6.QtMultimedia import QVideoFrame
 
 logger = logging.getLogger(__name__)
 
 
 class CameraManager(QObject):
     """封裝相機裝置清單、啟停、Session 與控制器建置"""
+
     focusUpdated = Signal(float, bool)
 
     def __init__(self, parent: Optional[QObject] = None):
@@ -87,7 +88,9 @@ class CameraManager(QObject):
                 img = img.convertToFormat(QImage.Format.Format_Grayscale8)
 
             ptr = img.constBits()
-            arr = np.frombuffer(ptr, np.uint8).reshape(img.height(), img.bytesPerLine())[:, :img.width()]
+            arr = np.frombuffer(ptr, np.uint8).reshape(img.height(), img.bytesPerLine())[
+                :, : img.width()
+            ]
 
             score = float(cv2.Laplacian(arr, cv2.CV_64F).var())
 
@@ -95,6 +98,57 @@ class CameraManager(QObject):
 
         except Exception:
             logger.debug("Frame processing for focus score failed", exc_info=True)
+
+    def _find_best_camera_format(self, dev: QCameraDevice) -> Optional[QCameraFormat]:
+        """Finds the best camera format based on config preferences."""
+        try:
+            cam_cfg = config["performance"]["camera"]
+            pref_width = cam_cfg["preferred_resolution"]["width"]
+            pref_height = cam_cfg["preferred_resolution"]["height"]
+            pref_fps = cam_cfg["preferred_framerate"]
+        except KeyError:
+            logger.debug("Camera performance preferences not found in config.")
+            return None
+
+        supported_formats = dev.videoFormats()
+        if not supported_formats:
+            return None
+
+        best_format = None
+        highest_score = -1e9  # Use a very small number for initial score
+
+        for fmt in supported_formats:
+            res = fmt.resolution()
+            width, height = res.width(), res.height()
+            # Frame rate can be a range, we check the maximum
+            fps = fmt.maxFrameRate()
+
+            score = 0
+            # Heavily penalize formats with lower resolution than preferred
+            if width < pref_width or height < pref_height:
+                score -= 100000
+
+            # Score based on how close the resolution area is
+            score -= abs(width * height - pref_width * pref_height)
+
+            # Bonus for matching framerate, with penalties for being off
+            if fps >= pref_fps:
+                score += 1000  # Bonus for meeting or exceeding framerate
+                score -= (fps - pref_fps) * 10  # Smaller penalty for being over
+            else:
+                score -= (pref_fps - fps) * 50  # Heavier penalty for being under
+
+            if score > highest_score:
+                highest_score = score
+                best_format = fmt
+
+        if best_format:
+            res = best_format.resolution()
+            logger.info(
+                f"Selected camera format: {res.width()}x{res.height()} "
+                f"@{best_format.maxFrameRate():.2f}fps (based on user preference)"
+            )
+        return best_format
 
     # ---- 裝置清單 ----
     def list_devices(self) -> list[tuple[str, QCameraDevice]]:
@@ -127,6 +181,15 @@ class CameraManager(QObject):
 
         dev = self._selected or QMediaDevices.defaultVideoInput()
         self._camera = QCamera(dev)
+
+        # --- Find and set best camera format based on config ---
+        best_format = self._find_best_camera_format(dev)
+        if best_format:
+            try:
+                self._camera.setCameraFormat(best_format)
+            except Exception:
+                logger.warning("Failed to set preferred camera format.", exc_info=True)
+
         self._session = QMediaCaptureSession()
         self._session.setCamera(self._camera)
 
@@ -155,17 +218,45 @@ class CameraManager(QObject):
         self._recorder = QMediaRecorder()
         self._session.setRecorder(self._recorder)
 
-        # 媒體格式（盡力）
+        # 媒體格式（從設定檔讀取）
         try:
+            rec_cfg = config["performance"]["video_recording"]
             fmt = QMediaFormat()
-            fmt.setFileFormat(QMediaFormat.MPEG4)
-            fmt.setVideoCodec(QMediaFormat.VideoCodec.H264)
+
+            # --- Map container format ---
+            container_map = {
+                "mp4": QMediaFormat.FileFormat.MPEG4,
+                "avi": QMediaFormat.FileFormat.AVI,
+            }
+            container_format = container_map.get(
+                rec_cfg["container"], QMediaFormat.FileFormat.MPEG4
+            )
+            fmt.setFileFormat(container_format)
+
+            # --- Map video codec ---
+            video_codec_map = {
+                "avc1": QMediaFormat.VideoCodec.H264,
+                "h264": QMediaFormat.VideoCodec.H264,
+                "mpeg4": QMediaFormat.VideoCodec.MPEG4,
+            }
+            video_codec = video_codec_map.get(rec_cfg["codec"], QMediaFormat.VideoCodec.H264)
+            fmt.setVideoCodec(video_codec)
+
+            # --- For simplicity, audio codec is kept for now ---
             fmt.setAudioCodec(QMediaFormat.AudioCodec.AAC)
             self._recorder.setMediaFormat(fmt)
-            self._recorder.setQuality(QMediaRecorder.Quality.NormalQuality)
+
+            # --- Map quality ---
+            quality_map = {
+                "low": QMediaRecorder.Quality.LowQuality,
+                "normal": QMediaRecorder.Quality.NormalQuality,
+                "high": QMediaRecorder.Quality.HighQuality,
+            }
+            quality = quality_map.get(rec_cfg["quality"], QMediaRecorder.Quality.NormalQuality)
+            self._recorder.setQuality(quality)
+
         except Exception:
             logger.warning("Recorder media format not fully set", exc_info=True)
-
         # 註冊錄影訊號
         if on_rec_state_changed:
             self._recorder.recorderStateChanged.connect(on_rec_state_changed)
@@ -217,5 +308,3 @@ class CameraManager(QObject):
             from PySide6.QtMultimedia import QCamera as _QCam
 
             return self._camera.cameraState() == _QCam.ActiveState
-
-

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from modules.app.config_manager import config
+
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -34,7 +36,9 @@ def build_ui(win):
 
     # 輸出路徑
     dir_box = QGroupBox("輸出路徑")
-    win.dir_edit = QLineEdit(str((Path.home() / "Pictures").expanduser()))
+    # Load path from config and expand user directory symbol '~'
+    default_path_str = config["paths"]["default_output"]
+    win.dir_edit = QLineEdit(str(Path(default_path_str).expanduser()))
     win.btn_browse = QPushButton("瀏覽")
     dir_layout = QHBoxLayout()
     dir_layout.addWidget(QLabel("資料夾:"))
@@ -70,13 +74,14 @@ def build_ui(win):
 
     # 連拍
     burst_box = QGroupBox("連拍")
+    burst_cfg = config["features"]["burst_shot"]
     win.burst_count = QSpinBox()
     win.burst_count.setRange(1, 999)
-    win.burst_count.setValue(5)
+    win.burst_count.setValue(burst_cfg["default_count"])
     win.burst_interval = QSpinBox()
     win.burst_interval.setRange(50, 10_000)
     win.burst_interval.setSingleStep(50)
-    win.burst_interval.setValue(500)
+    win.burst_interval.setValue(burst_cfg["default_interval_ms"])
     win.btn_start_burst = QPushButton("開始連拍")
     win.btn_stop_burst = QPushButton("停止連拍")
     burst_form = QFormLayout()
@@ -111,12 +116,16 @@ def build_ui(win):
     right_panel.addWidget(rec_box)
     # 分割工具區：運行方式、模型與自動分割按鈕同層顯示
     seg_box = QGroupBox("分割工具")
+    seg_cfg = config["advanced_features"]["segmentation"]
     seg_layout = QHBoxLayout()
     # 運行方式 (GPU / CPU)
     seg_layout.addWidget(QLabel("運行方式:"))
     win.sam_device_combo = QComboBox()
     win.sam_device_combo.addItems(["GPU", "CPU"])
-    win.sam_device_combo.setCurrentIndex(0)
+    default_device = seg_cfg.get("default_device", "GPU")
+    device_index = win.sam_device_combo.findText(default_device)
+    if device_index > -1:
+        win.sam_device_combo.setCurrentIndex(device_index)
     win.sam_device_combo.setToolTip("選擇運行方式 (GPU 或 CPU)")
     seg_layout.addWidget(win.sam_device_combo)
     # 模型大小 (H/L/B)
@@ -125,7 +134,10 @@ def build_ui(win):
     win.sam_model_combo.addItem("H", userData="vit_h")
     win.sam_model_combo.addItem("L", userData="vit_l")
     win.sam_model_combo.addItem("B", userData="vit_b")
-    win.sam_model_combo.setCurrentIndex(0)
+    default_model = seg_cfg.get("default_model", "vit_h")
+    model_index = win.sam_model_combo.findData(default_model)
+    if model_index > -1:
+        win.sam_model_combo.setCurrentIndex(model_index)
     win.sam_model_combo.setToolTip("選擇模型大小 (H/L/B)")
     seg_layout.addWidget(win.sam_model_combo)
     # 自動分割按鈕

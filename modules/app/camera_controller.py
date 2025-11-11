@@ -22,6 +22,7 @@ from typing import Optional
 
 from PySide6.QtWidgets import QMessageBox
 
+from modules.app.config_manager import config
 from modules.infrastructure.devices.camera_manager import CameraManager
 from utils.utils import clear_current_path_manager
 from modules.presentation.qt.ui_state import update_ui_state
