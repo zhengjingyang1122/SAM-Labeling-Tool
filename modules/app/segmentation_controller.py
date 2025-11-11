@@ -507,20 +507,24 @@ class SegmentationController:
     # ------------------------------------------------------------------
     # Explorer context menu entry point
     # ------------------------------------------------------------------
-    def open_segmentation_for_file_list(self, file_list: List[Path]) -> None:
+    def open_segmentation_for_file_list(self, file_list: List[str]) -> None:
         """Open a segmentation viewer for a list of files from the explorer."""
         if not file_list:
             return
+        
+        # The incoming file_list is List[str], convert to List[Path]
+        paths = [Path(p) for p in file_list]
+
         if not self._ensure_sam_available(interactive=True):
             return
         imgs: List[Path] = []
         videos: List[Path] = []
         video_exts = {".mp4", ".mov", ".avi", ".mkv"}
-        for p in file_list:
+        for p in paths:
             if p.suffix.lower() in video_exts:
-                videos.append(Path(p))
+                videos.append(p)
             else:
-                imgs.append(Path(p))
+                imgs.append(p)
         if imgs:
             # Use pivot order for the first image only
             ordered = []
