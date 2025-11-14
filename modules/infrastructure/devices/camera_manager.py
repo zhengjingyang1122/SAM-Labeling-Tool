@@ -99,7 +99,7 @@ class CameraManager(QObject):
         except Exception:
             logger.debug("Frame processing for focus score failed", exc_info=True)
 
-    def _find_best_camera_format(self, dev: QCameraDevice) -> Optional[QCameraFormat]:
+    def _find_best_camera_format(self, dev: QCameraDevice):
         """Finds the best camera format based on config preferences."""
         try:
             cam_cfg = config["performance"]["camera"]

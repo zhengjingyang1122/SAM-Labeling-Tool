@@ -7,8 +7,10 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+from utils.get_base_path import get_base_path
+
 # Define the path to the config file, relative to the project root
-CONFIG_FILE_PATH = Path(__file__).parent.parent.parent / "config" / "config.yaml"
+CONFIG_FILE_PATH = Path(get_base_path()) / "config" / "config.yaml"
 
 
 def get_default_config():

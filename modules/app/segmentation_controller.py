@@ -28,6 +28,7 @@ from modules.presentation.qt.segmentation.segmentation_viewer import (
     SegmentationViewer,
 )
 from utils.utils import clear_current_path_manager
+from utils.get_base_path import get_base_path
 from modules.presentation.qt.ui_state import update_ui_state
 
 try:
@@ -44,7 +45,7 @@ DEFAULT_SAM_MODEL_TYPE = "vit_h"
 # a single ``model`` directory rather than ``models``.  The H‑size model
 # (vit_h) uses the 4b8939 checkpoint name.  See ``MODEL_FILE_NAMES``
 # below for mapping of other model types to filenames.
-DEFAULT_SAM_CKPT = Path("./models/sam_vit_h_4b8939.pth")
+DEFAULT_SAM_CKPT = Path(get_base_path()) / "models" / "sam_vit_h_4b8939.pth"
 DEFAULT_SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
 
 # Mapping of supported SAM model types to their expected filename under ``./model``
@@ -149,7 +150,7 @@ class SegmentationController:
             # 根據當前選擇的模型類型決定預設檔案名稱
             fname = MODEL_FILE_NAMES.get(model_type)
             if fname:
-                candidate = Path("./models") / fname
+                candidate = Path(get_base_path()) / "models" / fname
                 if candidate.exists():
                     ckpt = candidate
                 else:
@@ -594,13 +595,13 @@ class SegmentationController:
     # Download helper
     # ------------------------------------------------------------------
     def _download_sam_with_prompt(self) -> Optional[Path]:
-        dst = DEFAULT_SAM_CKPT
+        dst = Path(get_base_path()) / "models" / "sam_vit_h_4b8939.pth"
         if dst.exists():
             return dst
         ret = QMessageBox.question(
             self.w,
             "下載 SAM 權重",
-            "找不到預設 SAM 權重檔:\nmodels/sam_vit_h_4b8939.pth\n\n要立即下載並儲存到 models/ 嗎？\n檔案約 2.5GB，時間視網路速度而定。",
+            f"找不到預設 SAM 權重檔:\n{dst}\n\n要立即下載並儲存到該位置嗎？\n檔案約 2.5GB，時間視網路速度而定。",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes,
         )
